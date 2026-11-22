@@ -1,55 +1,69 @@
 (()=>{
 'use strict';
-const PREFIX='EW_DRAW_V1:';
-const E=(tag,text)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e};
-const clamp=n=>Math.max(0,Math.min(1,n));
-const decode=s=>{try{return typeof s==='string'&&s.startsWith(PREFIX)?JSON.parse(s.slice(PREFIX.length)):null}catch{return null}};
-const draw=(ctx,items,w,h)=>{for(const o of items){ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
-if(o.k==='white'){ctx.fillStyle='#fff';ctx.fillRect(Math.min(o.x,o.x2)*w,Math.min(o.y,o.y2)*h,Math.abs(o.x2-o.x)*w,Math.abs(o.y2-o.y)*h)}
-else if(o.k==='text'){ctx.fillStyle=o.color;ctx.font='bold '+Math.max(12,w*.025)+'px sans-serif';ctx.fillText(o.text,o.x*w,o.y*h)}
-else{ctx.strokeStyle=o.color;ctx.lineWidth=Math.max(1,w*o.width);ctx.beginPath();if(o.k==='pen'){o.pts.forEach((p,i)=>i?ctx.lineTo(p[0]*w,p[1]*h):ctx.moveTo(p[0]*w,p[1]*h))}else{ctx.moveTo(o.x*w,o.y*h);ctx.lineTo(o.x2*w,o.y2*h)}ctx.stroke()}ctx.restore()}};
-const hit=(o,x,y)=>{if(o.k==='white')return x>=Math.min(o.x,o.x2)-.02&&x<=Math.max(o.x,o.x2)+.02&&y>=Math.min(o.y,o.y2)-.02&&y<=Math.max(o.y,o.y2)+.02;
-if(o.k==='text')return Math.abs(o.x-x)<.2&&Math.abs(o.y-y)<.05;
-if(o.k==='line'){const dx=o.x2-o.x,dy=o.y2-o.y,t=Math.max(0,Math.min(1,((x-o.x)*dx+(y-o.y)*dy)/(dx*dx+dy*dy||1)));return Math.hypot(x-(o.x+t*dx),y-(o.y+t*dy))<.025}
-return (o.pts||[]).some(p=>Math.hypot(x-p[0],y-p[1])<.025)};
-async function open(opts){
-const {sb,document:doc,user,docUrl}=opts;
-if(!window.pdfjsLib){alert('Le lecteur PDF ne s’est pas chargé.');return}
+const PREFIX='EW_DRAW_V1:', clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,n));
+const E=(tag,txt,cls)=>{const e=document.createElement(tag);if(txt!==undefined)e.textContent=txt;if(cls)e.className=cls;return e};
+const decode=s=>{try{const a=typeof s==='string'&&s.startsWith(PREFIX)?JSON.parse(s.slice(PREFIX.length)):null;return Array.isArray(a)?a:null}catch{return null}};
+function draw(ctx,list,w,h){for(const o of list){ctx.save();ctx.lineJoin=ctx.lineCap='round';if(o.k==='white'){ctx.fillStyle='#fff';ctx.fillRect(Math.min(o.x,o.x2)*w,Math.min(o.y,o.y2)*h,Math.abs(o.x2-o.x)*w,Math.abs(o.y2-o.y)*h)}else if(o.k==='text'){ctx.fillStyle=o.color||'#30343a';ctx.font='bold '+Math.max(12,w*.025)+'px sans-serif';ctx.fillText(o.text||'',o.x*w,o.y*h)}else{ctx.strokeStyle=o.color||'#333';ctx.lineWidth=Math.max(1,w*(o.width||.003));ctx.beginPath();if(o.k==='pen'){(o.pts||[]).forEach((p,i)=>i?ctx.lineTo(p[0]*w,p[1]*h):ctx.moveTo(p[0]*w,p[1]*h))}else{ctx.moveTo(o.x*w,o.y*h);ctx.lineTo(o.x2*w,o.y2*h)}ctx.stroke()}ctx.restore()}}
+function hit(o,x,y){if(o.k==='white')return x>=Math.min(o.x,o.x2)-.025&&x<=Math.max(o.x,o.x2)+.025&&y>=Math.min(o.y,o.y2)-.025&&y<=Math.max(o.y,o.y2)+.025;if(o.k==='text')return Math.abs(o.x-x)<.22&&Math.abs(o.y-y)<.045;if(o.k==='line'){const dx=o.x2-o.x,dy=o.y2-o.y,t=clamp(((x-o.x)*dx+(y-o.y)*dy)/(dx*dx+dy*dy||1));return Math.hypot(x-o.x-t*dx,y-o.y-t*dy)<.025}return(o.pts||[]).some(p=>Math.hypot(x-p[0],y-p[1])<.025)}
+async function open({sb,document:doc,user,docUrl}){
+if(!window.pdfjsLib){alert('Lecteur PDF indisponible.');return}
 window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-const background=E('div');background.className='ew-editor-backdrop';
-const panel=E('div');panel.className='ew-editor-panel';background.append(panel);
-const title=E('h2','Modifier le schéma — Rév. '+doc.revision),help=E('p',"Le correcteur blanc masque visuellement le PDF d'origine, sans effacer les données. Les modifications restent internes."),toolbar=E('div'),navigation=E('div'),area=E('div'),pdfCanvas=E('canvas'),canvas=E('canvas'),footer=E('div'),message=E('p');
-toolbar.className='ew-editor-toolbar';navigation.className='ew-editor-pages';area.className='ew-editor-workspace';footer.className='ew-editor-footer';message.className='ew-editor-status';pdfCanvas.className='ew-pdf-layer';canvas.className='ew-ink-layer';
-area.append(pdfCanvas,canvas);panel.append(title,help,toolbar,navigation,area,footer,message);document.body.append(background);
-let pdf,page=1,tool='pen',items=[],rows=[],ownedRow=null,active=null,dirty=false,busy=false;
-const color=E('input');color.type='color';color.value='#d62828';
-const width=E('input');width.type='range';width.min='1';width.max='10';width.value='3';
-const visibility=E('select');[['shared','Partagée'],['personal','Personnelle']].forEach(a=>{const o=E('option',a[1]);o.value=a[0];visibility.append(o)});
-const saveButton=E('button','Enregistrer'),closeButton=E('button','Fermer'),prev=E('button','←'),next=E('button','→'),label=E('span');
-closeButton.className='secondary';footer.append(E('span','Couleur'),color,E('span','Épaisseur'),width,E('span','Visibilité'),visibility,saveButton,closeButton);navigation.append(prev,label,next);
-const buttons={}; [['Crayon','pen'],['Trait','line'],['Correcteur blanc','white'],['Texte','text'],['Gomme','erase'],['Annuler','undo']].forEach(v=>{const b=E('button',v[0]);b.type='button';toolbar.append(b);buttons[v[1]]=b;b.onclick=()=>{if(v[1]==='undo'){if(items.length){items.pop();dirty=true;paint();message.textContent='Dernier tracé supprimé.'}return}tool=v[1];Object.entries(buttons).forEach(([key,btn])=>btn.classList.toggle('is-active',key===tool))}});buttons.pen.click();
-const setMessage=(t,err=false)=>{message.textContent=t;message.style.color=err?'#b42318':''};
+const backdrop=E('div',undefined,'ew-editor-backdrop'),panel=E('div',undefined,'ew-editor-panel'),top=E('header',undefined,'ew-editor-head'),heading=E('div',doc.filename+' · Rév. '+doc.revision,'ew-editor-title'),close=E('button','✕','secondary');
+const navigator=E('div',undefined,'ew-editor-pages'),prev=E('button','‹','secondary'),next=E('button','›','secondary'),pageLabel=E('span','Page 1','ew-editor-page-label');
+const controls=E('div',undefined,'ew-zoom-controls'),minus=E('button','−','secondary'),zoomLabel=E('span','100 %'),plus=E('button','+','secondary'),fit=E('button','Ajuster','secondary');
+const viewport=E('div',undefined,'ew-editor-viewport'),stage=E('div',undefined,'ew-editor-workspace'),pdfCanvas=E('canvas',undefined,'ew-pdf-layer'),ink=E('canvas',undefined,'ew-ink-layer');
+const dock=E('div',undefined,'ew-editor-dock'),tools=E('div',undefined,'ew-editor-toolbar'),options=E('div',undefined,'ew-editor-options'),info=E('div','Mode navigation : glisser pour déplacer · pincer pour zoomer','ew-editor-status');
+const color=E('input'),stroke=E('input'),visibility=E('select'),save=E('button','Enregistrer','ew-save'),buttons={};
+color.type='color';color.value='#444444';stroke.type='range';stroke.min=1;stroke.max=10;stroke.value=3;
+[['shared','Partagée'],['personal','Personnelle']].forEach(([v,t])=>{const o=E('option',t);o.value=v;visibility.append(o)});
+const label=(s,control)=>{const e=E('label',s);e.append(control);return e};
+options.append(label('Couleur ',color),label('Épaisseur ',stroke),label('Visibilité ',visibility),save);
+navigator.append(prev,pageLabel,next);controls.append(minus,zoomLabel,plus,fit);top.append(heading,navigator,controls,close);stage.append(pdfCanvas,ink);viewport.append(stage);
+panel.append(top,viewport,dock,info);dock.append(tools,options);backdrop.append(panel);document.body.append(backdrop);document.body.classList.add('ew-editing');
+let pdf,page=1,mode='navigate',items=[],rows=[],own=null,draft=null,dirty=false,busy=false,baseW=1,baseH=1,zoom=1,tx=0,ty=0,pan=null,gesture=null,lastTap=0;
+const pointers=new Map();
+const setStatus=(s,error=false)=>{info.textContent=s;info.style.color=error?'#a52b2b':''};
+function selectMode(m){mode=m;Object.entries(buttons).forEach(([k,b])=>b.classList.toggle('is-active',k===m));options.classList.toggle('is-hidden',m==='navigate');ink.style.cursor=m==='navigate'?'grab':m==='text'?'text':'crosshair';setStatus(m==='navigate'?'Navigation : un doigt pour déplacer, deux pour zoomer.':'Outil actif : '+buttons[m]?.textContent+'. Deux doigts pour naviguer.')}
+const choices=[['✋ Déplacer','navigate'],['✎ Crayon','pen'],['／ Trait','line'],['▭ Correcteur','white'],['T Texte','text'],['⌫ Gomme','erase'],['↶ Annuler','undo']];
+for(const [name,k]of choices){const b=E('button',name);b.type='button';buttons[k]=b;tools.append(b);b.onclick=()=>{if(k==='undo'){if(items.length){items.pop();dirty=true;paint();setStatus('Dernière annotation retirée. Enregistrez.')}return}selectMode(k)}}
+selectMode('navigate');
 const pageRows=()=>rows.filter(r=>r.page===page&&decode(r.content));
-const paint=()=>{const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);pageRows().forEach(r=>{if(!ownedRow||r.id!==ownedRow.id)draw(ctx,decode(r.content),canvas.width,canvas.height)});draw(ctx,items,canvas.width,canvas.height);if(active)draw(ctx,[active],canvas.width,canvas.height)};
-const load=()=>{ownedRow=pageRows().find(r=>r.author_id===user.id&&r.visibility===visibility.value)||null;items=ownedRow?[...decode(ownedRow.content)]:[];dirty=false;paint()};
-async function render(){busy=true;try{const p=await pdf.getPage(page);const v=p.getViewport({scale:1});const size=Math.min(1150,Math.max(300,innerWidth-60)),vp=p.getViewport({scale:size/v.width});pdfCanvas.width=canvas.width=Math.ceil(vp.width);pdfCanvas.height=canvas.height=Math.ceil(vp.height);area.style.width=canvas.width+'px';area.style.height=canvas.height+'px';await p.render({canvasContext:pdfCanvas.getContext('2d'),viewport:vp}).promise;label.textContent='Page '+page+' / '+pdf.numPages;load()}catch(e){setMessage(e.message,true)}finally{busy=false}}
-function position(e){const b=canvas.getBoundingClientRect();return {x:clamp((e.clientX-b.left)/b.width),y:clamp((e.clientY-b.top)/b.height)}}
-canvas.addEventListener('pointerdown',e=>{if(busy)return;const p=position(e);
-if(tool==='erase'){const i=items.findLastIndex(o=>hit(o,p.x,p.y));if(i<0){setMessage('La gomme efface vos annotations de cette page. Utilisez le correcteur blanc pour masquer le PDF.');return}items.splice(i,1);dirty=true;paint();return}
-if(tool==='text'){const text=prompt('Texte à ajouter au schéma :');if(text&&text.trim()){items.push({k:'text',x:p.x,y:p.y,text:text.slice(0,200),color:color.value});dirty=true;paint()}return}
-active={k:tool,x:p.x,y:p.y,x2:p.x,y2:p.y,pts:[[p.x,p.y]],color:color.value,width:Number(width.value)/1000};canvas.setPointerCapture(e.pointerId);paint()});
-canvas.addEventListener('pointermove',e=>{if(!active)return;const p=position(e);active.x2=p.x;active.y2=p.y;if(active.k==='pen')active.pts.push([p.x,p.y]);paint()});
-const finish=()=>{if(!active)return;items.push(active);active=null;dirty=true;paint();setMessage('Modifications non enregistrées.')};canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',finish);
-saveButton.onclick=async()=>{if(!dirty){setMessage('Aucune modification à enregistrer.');return}saveButton.disabled=true;try{const content=PREFIX+JSON.stringify(items);let response;
-if(ownedRow)response=await sb.from('annotations').update({content}).eq('id',ownedRow.id).eq('author_id',user.id).select().single();
-else response=await sb.from('annotations').insert({document_id:doc.id,author_id:user.id,page,visibility:visibility.value,content}).select().single();
-if(response.error)throw response.error;
-const refreshed=await sb.from('annotations').select('*').eq('document_id',doc.id);if(refreshed.error)throw refreshed.error;rows=refreshed.data||[];load();setMessage('Modifications enregistrées sur cette révision. Invisibles au client.')}catch(e){setMessage('Échec de l’enregistrement : '+e.message,true)}finally{saveButton.disabled=false}};
-const navigate=async n=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?'))return;if(page+n<1||page+n>pdf.numPages)return;page+=n;await render()};
-prev.onclick=()=>navigate(-1);next.onclick=()=>navigate(1);
+function paint(){const ctx=ink.getContext('2d');ctx.clearRect(0,0,baseW,baseH);for(const r of pageRows())if(!own||r.id!==own.id)draw(ctx,decode(r.content),baseW,baseH);draw(ctx,items,baseW,baseH);if(draft)draw(ctx,[draft],baseW,baseH)}
+function load(){own=pageRows().find(r=>r.author_id===user.id&&r.visibility===visibility.value)||null;items=own?[...decode(own.content)]:[];dirty=false;paint()}
+function bound(){const vw=viewport.clientWidth,vh=viewport.clientHeight,ww=baseW*zoom,hh=baseH*zoom;if(ww<=vw)tx=(vw-ww)/2;else tx=clamp(tx,vw-ww-35,35);if(hh<=vh)ty=(vh-hh)/2;else ty=clamp(ty,vh-hh-35,35)}
+function transform(){bound();stage.style.transform='translate3d('+tx+'px,'+ty+'px,0) scale('+zoom+')';zoomLabel.textContent=Math.round(zoom*100)+' %'}
+function setZoom(z,clientX,clientY){const rect=viewport.getBoundingClientRect(),x=(clientX??(rect.left+rect.width/2))-rect.left,y=(clientY??(rect.top+rect.height/2))-rect.top;const nz=clamp(z,1,6),factor=nz/zoom;tx=x-(x-tx)*factor;ty=y-(y-ty)*factor;zoom=nz;transform()}
+async function renderPage(){busy=true;try{const p=await pdf.getPage(page),view=p.getViewport({scale:1});const target=Math.min(1250,Math.max(300,viewport.clientWidth-18)),v=p.getViewport({scale:target/view.width});baseW=ink.width=pdfCanvas.width=Math.round(v.width);baseH=ink.height=pdfCanvas.height=Math.round(v.height);stage.style.width=baseW+'px';stage.style.height=baseH+'px';await p.render({canvasContext:pdfCanvas.getContext('2d'),viewport:v}).promise;pageLabel.textContent=page+' / '+pdf.numPages;zoom=1;tx=0;ty=0;transform();load()}catch(e){setStatus('Erreur PDF : '+e.message,true)}finally{busy=false}}
+function norm(p){const b=ink.getBoundingClientRect();return{x:clamp((p.clientX-b.left)/b.width),y:clamp((p.clientY-b.top)/b.height)}}
+function middle(){const a=[...pointers.values()];return{x:(a[0].clientX+a[1].clientX)/2,y:(a[0].clientY+a[1].clientY)/2}}
+function distance(){const a=[...pointers.values()];return Math.hypot(a[0].clientX-a[1].clientX,a[0].clientY-a[1].clientY)}
+ink.addEventListener('pointerdown',e=>{
+if(busy)return;ink.setPointerCapture(e.pointerId);pointers.set(e.pointerId,{clientX:e.clientX,clientY:e.clientY});
+if(pointers.size===2){draft=null;pan=null;const mid=middle();gesture={distance:distance(),zoom,mid,tx,ty};paint();return}
+if(pointers.size>2)return;
+const p=norm(e);
+if(mode==='navigate'){pan={x:e.clientX,y:e.clientY,tx,ty};return}
+if(mode==='erase'){const i=items.findLastIndex(o=>hit(o,p.x,p.y));if(i>=0){items.splice(i,1);dirty=true;paint();setStatus('Annotation effacée. Enregistrer.')}else setStatus('La gomme efface vos annotations ; pour masquer le PDF, utilisez Correcteur.');return}
+if(mode==='text'){const t=prompt('Texte à placer sur le schéma :');if(t?.trim()){items.push({k:'text',x:p.x,y:p.y,text:t.slice(0,250),color:color.value});dirty=true;paint()}return}
+draft={k:mode,x:p.x,y:p.y,x2:p.x,y2:p.y,pts:[[p.x,p.y]],color:color.value,width:Number(stroke.value)/1000};paint()
+});
+ink.addEventListener('pointermove',e=>{
+if(!pointers.has(e.pointerId))return;pointers.set(e.pointerId,{clientX:e.clientX,clientY:e.clientY});
+if(pointers.size>=2){if(!gesture)return;const mid=middle(),factor=distance()/Math.max(1,gesture.distance);const target=clamp(gesture.zoom*factor,1,6);const rect=viewport.getBoundingClientRect(),cx=gesture.mid.x-rect.left,cy=gesture.mid.y-rect.top,nx=mid.x-rect.left,ny=mid.y-rect.top;zoom=target;tx=nx-(cx-gesture.tx)*(target/gesture.zoom);ty=ny-(cy-gesture.ty)*(target/gesture.zoom);transform();return}
+if(pan){tx=pan.tx+e.clientX-pan.x;ty=pan.ty+e.clientY-pan.y;transform();return}
+if(!draft)return;const p=norm(e);draft.x2=p.x;draft.y2=p.y;if(draft.k==='pen')draft.pts.push([p.x,p.y]);paint()
+});
+function finish(e){const wasPinching=!!gesture;pointers.delete(e.pointerId);if(wasPinching){draft=null;pan=null;if(pointers.size<2)gesture=null;paint();return}if(pan){pan=null;return}if(draft){const isTiny=draft.k!=='pen'&&Math.hypot(draft.x-draft.x2,draft.y-draft.y2)<.001;if(!isTiny){items.push(draft);dirty=true;setStatus('Modification non enregistrée.')}draft=null;paint()}}
+ink.addEventListener('pointerup',finish);ink.addEventListener('pointercancel',finish);
+ink.addEventListener('dblclick',e=>{if(mode==='navigate')setZoom(zoom<2?zoom*2:1,e.clientX,e.clientY)});
+viewport.addEventListener('wheel',e=>{if(!e.ctrlKey&&Math.abs(e.deltaY)<5)return;e.preventDefault();setZoom(zoom*(e.deltaY<0?1.12:1/1.12),e.clientX,e.clientY)},{passive:false});
+minus.onclick=()=>setZoom(zoom/1.4);plus.onclick=()=>setZoom(zoom*1.4);fit.onclick=()=>{zoom=1;tx=ty=0;transform()};window.addEventListener('resize',transform,{signal:(()=>{const ctl=new AbortController();backdrop._resizeCtl=ctl;return ctl.signal})()});
+save.onclick=async()=>{if(!dirty){setStatus('Aucune modification à enregistrer.');return}save.disabled=true;try{const content=PREFIX+JSON.stringify(items);let r;if(own)r=await sb.from('annotations').update({content}).eq('id',own.id).eq('author_id',user.id).select().single();else r=await sb.from('annotations').insert({document_id:doc.id,author_id:user.id,page,visibility:visibility.value,content}).select().single();if(r.error)throw r.error;const q=await sb.from('annotations').select('*').eq('document_id',doc.id);if(q.error)throw q.error;rows=q.data||[];load();setStatus('Enregistré. Le PDF officiel reste inchangé.')}catch(e){setStatus('Enregistrement impossible : '+e.message,true)}finally{save.disabled=false}};
+const changePage=async n=>{if(dirty&&!confirm('Modifications non enregistrées. Changer de page ?'))return;if(page+n<1||page+n>pdf.numPages)return;page+=n;await renderPage();selectMode('navigate')};prev.onclick=()=>changePage(-1);next.onclick=()=>changePage(1);
 visibility.onchange=()=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?')){visibility.value=visibility.value==='shared'?'personal':'shared';return}load()};
-const close=()=>{if(dirty&&!confirm('Fermer sans enregistrer ?'))return;background.remove()};closeButton.onclick=close;
-try{setMessage('Chargement du schéma…');const url=await docUrl(doc);pdf=await window.pdfjsLib.getDocument(url).promise;const result=await sb.from('annotations').select('*').eq('document_id',doc.id);if(result.error)throw result.error;rows=result.data||[];await render();setMessage('Touchez le schéma pour dessiner.')}catch(e){setMessage('Erreur : '+e.message,true)}
+function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing')}
+close.onclick=end;
+try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[];await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }
 window.EW_PDF_EDITOR={open};
 })();
