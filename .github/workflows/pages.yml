@@ -32,6 +32,7 @@ jobs:
           cp index.html _site/index.html
           cp pdf-editor.js _site/pdf-editor.js
           cp pdf-editor.css _site/pdf-editor.css
+          cp redesign.css _site/redesign.css
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
