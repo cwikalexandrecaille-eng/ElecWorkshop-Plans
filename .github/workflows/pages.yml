@@ -29,6 +29,9 @@ jobs:
           test -s _site/style.css
           test -s _site/config.js
           cp app.js _site/app.js
+          cp index.html _site/index.html
+          cp pdf-editor.js _site/pdf-editor.js
+          cp pdf-editor.css _site/pdf-editor.css
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
