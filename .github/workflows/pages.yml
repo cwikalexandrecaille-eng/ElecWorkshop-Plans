@@ -28,6 +28,7 @@ jobs:
           test -s _site/app.js
           test -s _site/style.css
           test -s _site/config.js
+          cp app.js _site/app.js
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
