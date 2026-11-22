@@ -1,0 +1,17 @@
+
+/* Éditeur graphique tactile PDF */
+.ew-editor-backdrop{position:fixed;z-index:99999;inset:0;background:rgba(5,20,32,.8);overflow:auto;padding:8px}
+.ew-editor-panel{background:#fff;color:#122332;border-radius:14px;max-width:1240px;min-height:85vh;margin:0 auto;padding:14px;box-sizing:border-box}
+.ew-editor-panel h2{margin:6px 0 8px;font-size:1.15rem}
+.ew-editor-panel>p{font-size:.85rem;margin:6px 0 10px}
+.ew-editor-toolbar,.ew-editor-footer,.ew-editor-pages{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 0}
+.ew-editor-toolbar button,.ew-editor-pages button{padding:9px 10px;min-width:52px}
+.ew-editor-toolbar button.is-active{background:#1264a3;color:#fff;border-color:#1264a3}
+.ew-editor-workspace{position:relative;max-width:none;box-shadow:0 2px 12px #0003;margin:6px auto;background:white}
+.ew-pdf-layer,.ew-ink-layer{position:absolute;top:0;left:0;width:100%;height:100%}
+.ew-ink-layer{touch-action:none;cursor:crosshair}
+.ew-editor-panel{overflow-x:auto}
+.ew-editor-footer{position:sticky;bottom:0;background:#fff;border-top:1px solid #d6e0e9;z-index:2}
+.ew-editor-footer input[type="color"]{width:48px;height:35px}
+.ew-editor-footer select{max-width:140px}
+.ew-editor-status{font-size:.85rem;min-height:1.4em}
