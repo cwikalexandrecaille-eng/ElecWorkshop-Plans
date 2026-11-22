@@ -18,12 +18,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Préparer le site
+      - name: Préparer le site depuis l'archive
         run: |
+          set -eu
+          test -f elecworkshop-plans-site.zip
           mkdir -p _site
           unzip -o elecworkshop-plans-site.zip -d _site
-          test -f _site/index.html
-          test -f _site/app.js
+          test -s _site/index.html
+          test -s _site/app.js
+          test -s _site/style.css
+          test -s _site/config.js
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
