@@ -1,17 +1,39 @@
-
-/* Éditeur graphique tactile PDF */
-.ew-editor-backdrop{position:fixed;z-index:99999;inset:0;background:rgba(5,20,32,.8);overflow:auto;padding:8px}
-.ew-editor-panel{background:#fff;color:#122332;border-radius:14px;max-width:1240px;min-height:85vh;margin:0 auto;padding:14px;box-sizing:border-box}
-.ew-editor-panel h2{margin:6px 0 8px;font-size:1.15rem}
-.ew-editor-panel>p{font-size:.85rem;margin:6px 0 10px}
-.ew-editor-toolbar,.ew-editor-footer,.ew-editor-pages{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:8px 0}
-.ew-editor-toolbar button,.ew-editor-pages button{padding:9px 10px;min-width:52px}
-.ew-editor-toolbar button.is-active{background:#1264a3;color:#fff;border-color:#1264a3}
-.ew-editor-workspace{position:relative;max-width:none;box-shadow:0 2px 12px #0003;margin:6px auto;background:white}
-.ew-pdf-layer,.ew-ink-layer{position:absolute;top:0;left:0;width:100%;height:100%}
-.ew-ink-layer{touch-action:none;cursor:crosshair}
-.ew-editor-panel{overflow-x:auto}
-.ew-editor-footer{position:sticky;bottom:0;background:#fff;border-top:1px solid #d6e0e9;z-index:2}
-.ew-editor-footer input[type="color"]{width:48px;height:35px}
-.ew-editor-footer select{max-width:140px}
-.ew-editor-status{font-size:.85rem;min-height:1.4em}
+/* ElecWorkshop Plans - thème gris / blanc */
+:root{--ew-bg:#f5f6f7;--ew-panel:#fff;--ew-border:#dce0e4;--ew-ink:#30343a;--ew-muted:#6d737b;--ew-soft:#eef0f2}
+body{background:var(--ew-bg)!important;color:var(--ew-ink)!important}
+body>header{background:#fff!important;color:#30343a!important;border-bottom:1px solid var(--ew-border)!important;box-shadow:none!important}
+body>header .brand,body>header .brand span{color:#30343a!important}
+body .card,body .modal,body .item{background:#fff!important;color:#30343a!important;border-color:var(--ew-border)!important;box-shadow:0 1px 4px #1c283014!important}
+body button,body .btn{border-radius:9px!important}
+body button:not(.secondary),body .btn:not(.secondary){background:#424850!important;border-color:#424850!important;color:white!important}
+body button.secondary,body .btn.secondary{background:#f0f2f4!important;border-color:#dde1e5!important;color:#30343a!important}
+body input,body select,body textarea{border-color:#d1d6dc!important;background:white!important;color:#30343a!important}
+body .muted,body .small{color:#737981}
+body .pill{background:#eff1f3!important;color:#505760!important}
+body.ew-editing{overflow:hidden!important}
+.ew-editor-backdrop{position:fixed;inset:0;z-index:99999;background:#f4f5f6;padding:0;overflow:hidden;font-family:inherit}
+.ew-editor-panel{display:flex;flex-direction:column;width:100%;height:100dvh;max-height:100dvh;background:#f7f8f9;color:#30343a;padding:0;margin:0;box-sizing:border-box;overflow:hidden}
+.ew-editor-head{position:relative;flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;background:#fff;border-bottom:1px solid #e0e3e6;box-shadow:0 1px 3px #00000008;color:#30343a!important}
+.ew-editor-title{font-size:13px;font-weight:650;flex:1;min-width:135px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ew-editor-head>.secondary{background:#f1f2f4!important;color:#363b40!important;min-width:38px;padding:7px!important}
+.ew-editor-pages,.ew-zoom-controls{display:flex;align-items:center;gap:5px;white-space:nowrap}
+.ew-editor-pages button,.ew-zoom-controls button{min-width:32px;min-height:33px;padding:5px 8px!important;border-radius:8px!important}
+.ew-editor-page-label,.ew-zoom-controls span{font-size:12px;color:#626970;min-width:42px;text-align:center}
+.ew-editor-viewport{flex:1;min-height:0;width:100%;position:relative;overflow:hidden;background:#e9ebed;touch-action:none;overscroll-behavior:contain}
+.ew-editor-workspace{position:absolute;top:0;left:0;transform-origin:top left;background:white;box-shadow:0 2px 14px #1b27331e;will-change:transform}
+.ew-pdf-layer,.ew-ink-layer{position:absolute;inset:0;width:100%;height:100%;display:block}
+.ew-ink-layer{touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}
+.ew-editor-dock{flex:none;background:#fff;border-top:1px solid #e0e3e6;padding:7px 8px max(7px,env(safe-area-inset-bottom));box-shadow:0 -3px 10px #00000008}
+.ew-editor-toolbar{display:flex;gap:5px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;padding-bottom:3px}
+.ew-editor-toolbar::-webkit-scrollbar{display:none}
+.ew-editor-toolbar button{white-space:nowrap;flex:none;min-height:41px;font-size:12px;border-radius:10px!important;padding:8px 11px!important;background:#f2f3f5!important;color:#4a5058!important;border:1px solid #e0e3e6!important}
+.ew-editor-toolbar button.is-active{background:#dee2e6!important;color:#22272d!important;border-color:#b8bec5!important;font-weight:700}
+.ew-editor-options{display:flex;gap:9px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:7px 3px 0}
+.ew-editor-options.is-hidden{display:none}
+.ew-editor-options label{display:flex;gap:5px;align-items:center;font-size:11px;white-space:nowrap}
+.ew-editor-options input[type=color]{width:33px;height:31px;padding:1px!important}
+.ew-editor-options input[type=range]{width:72px}
+.ew-editor-options select{max-width:114px;font-size:12px}
+.ew-editor-options .ew-save{min-height:34px;font-size:12px}
+.ew-editor-status{flex:none;min-height:18px;font-size:11px;padding:3px 10px;color:#727980;background:#fff;text-align:center}
+@media(max-width:580px){.ew-editor-head{padding:8px;gap:5px}.ew-editor-title{flex-basis:calc(100% - 50px)}.ew-editor-pages{margin-right:auto}.ew-zoom-controls{margin-left:auto}.ew-zoom-controls button{min-width:29px}.ew-editor-options{gap:6px}.ew-editor-options label{font-size:10px}}
