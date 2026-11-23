@@ -43,8 +43,6 @@ const setStatus=(s,error=false)=>{info.textContent=s;info.style.color=error?'#a5
 function selectMode(m){mode=m;if(m!=='select')selectedId=null;refreshSelection();Object.entries(buttons).forEach(([k,b])=>b.classList.toggle('is-active',k===m));options.classList.toggle('is-hidden',m==='navigate');ink.style.cursor=m==='navigate'?'grab':m==='text'?'text':'crosshair';setStatus(m==='navigate'?'Navigation : un doigt pour déplacer, deux pour zoomer.':'Outil actif : '+buttons[m]?.textContent+'. Deux doigts pour naviguer.')}
 const choices=[['✋ Déplacer','navigate'],['☝ Sélection','select'],['▦ Symboles','symbols'],['✎ Crayon','pen'],['／ Trait','line'],['▭ Correcteur','white'],['T Texte','text'],['⌫ Gomme','erase'],['↶ Annuler','undo']];
 for(const [name,k]of choices){const b=E('button',name);b.type='button';buttons[k]=b;tools.append(b);b.onclick=()=>{if(k==='undo'){if(items.length){items.pop();dirty=true;paint();setStatus('Dernière annotation retirée. Enregistrez.')}return}if(k==='symbols'){selectMode('select');library.hidden=false;renderCatalog();return}library.hidden=true;selectMode(k)}}
-selectMode('navigate');
-
 const byId=id=>items.find(o=>o.id===id);
 const selected=()=>byId(selectedId);
 const members=()=>{const o=selected();return !o?[]:(o.grouped&&o.groupId)?items.filter(q=>q.groupId===o.groupId&&q.grouped):[o]};
@@ -72,6 +70,7 @@ let j=0;for(const key of ['repere','reference','fonction']){const val=fields[key
 items.push(...group);library.hidden=true;libForm.replaceChildren();selectMode('select');selectedId=group[0].id;mutate(s.name+' inséré : déplacez-le avec le doigt')}
 }
 
+selectMode('navigate');
 const pageRows=()=>rows.filter(r=>r.page===page&&decode(r.content));
 function paint(){const ctx=ink.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,ink.width,ink.height);ctx.setTransform(inkScale,0,0,inkScale,0,0);for(const r of pageRows())if(!own||r.id!==own.id)draw(ctx,decode(r.content),baseW,baseH);draw(ctx,items,baseW,baseH);if(mode==='select'&&selected()){const o=selected(),px=o.x*baseW,py=o.y*baseH;ctx.save();ctx.strokeStyle='#557992';ctx.setLineDash([5,4]);ctx.strokeRect(px-(o.k==='symbol'?(o.w||.07)*baseW/2:4)-5,py-(o.k==='symbol'?(o.h||.09)*baseH/2:16)-5,o.k==='symbol'?(o.w||.07)*baseW+10:Math.max(30,String(o.text||'').length*9),o.k==='symbol'?(o.h||.09)*baseH+10:25);ctx.restore()}if(draft)draw(ctx,[draft],baseW,baseH)}
 function load(){own=pageRows().find(r=>r.author_id===user.id&&r.visibility===visibility.value)||null;items=own?[...decode(own.content)]:[];dirty=false;selectedId=null;paint();refreshSelection()}
