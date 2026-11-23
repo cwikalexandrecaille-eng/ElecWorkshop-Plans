@@ -34,6 +34,15 @@ jobs:
           cp pdf-editor.css _site/pdf-editor.css
           cp redesign.css _site/redesign.css
           cp ui-v3.css _site/ui-v3.css
+          cp icon.svg _site/icon.svg
+          cp manifest.webmanifest _site/manifest.webmanifest
+          cp sw.js _site/sw.js
+          python3 -m venv /tmp/ew-pwa-icons
+          /tmp/ew-pwa-icons/bin/pip install --quiet CairoSVG==2.7.1
+          /tmp/ew-pwa-icons/bin/python -c "import cairosvg; [(cairosvg.svg2png(url='_site/icon.svg',write_to='_site/'+name,output_width=size,output_height=size)) for name,size in [('apple-touch-icon.png',180),('icon-192.png',192),('icon-512.png',512)]]"
+          test -s _site/apple-touch-icon.png
+          test -s _site/icon-192.png
+          test -s _site/icon-512.png
           node --check _site/app.js
           node --check _site/pdf-editor.js
           test -s _site/ui-v3.css
