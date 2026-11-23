@@ -2,6 +2,7 @@
 'use strict';
 const PREFIX='EW_DRAW_V1:', clamp=(n,a=0,b=1)=>Math.max(a,Math.min(b,n));
 const E=(tag,txt,cls)=>{const e=document.createElement(tag);if(txt!==undefined)e.textContent=txt;if(cls)e.className=cls;return e};
+const BUILTIN_SYMBOLS=[{"id":"builtin:disjoncteur","slug":"disjoncteur","name":"Disjoncteur","category":"Protection","paths":[["l",0.5,0,0.5,0.3],["l",0.5,0.7,0.5,1],["l",0.5,0.3,0.7,0.66],["c",0.5,0.3,0.035],["c",0.5,0.7,0.035]],"active":true},{"id":"builtin:fusible","slug":"fusible","name":"Fusible","category":"Protection","paths":[["l",0.5,0,0.5,0.32],["r",0.3,0.32,0.4,0.36],["l",0.5,0.68,0.5,1]],"active":true},{"id":"builtin:sectionneur","slug":"sectionneur","name":"Sectionneur","category":"Protection","paths":[["l",0.5,0,0.5,0.3],["l",0.5,0.7,0.5,1],["l",0.5,0.3,0.73,0.65],["c",0.5,0.3,0.035],["c",0.5,0.7,0.035]],"active":true},{"id":"builtin:contact-no","slug":"contact-no","name":"Contact NO","category":"Commande","paths":[["l",0,0.5,0.3,0.5],["l",0.7,0.5,1,0.5],["l",0.35,0.2,0.35,0.8],["l",0.65,0.2,0.65,0.8]],"active":true},{"id":"builtin:contact-nf","slug":"contact-nf","name":"Contact NF","category":"Commande","paths":[["l",0,0.5,0.3,0.5],["l",0.7,0.5,1,0.5],["l",0.35,0.2,0.35,0.8],["l",0.65,0.2,0.65,0.8],["l",0.2,0.8,0.8,0.2]],"active":true},{"id":"builtin:bobine","slug":"bobine","name":"Bobine relais","category":"Commande","paths":[["l",0.5,0,0.5,0.25],["r",0.2,0.25,0.6,0.5],["l",0.5,0.75,0.5,1]],"active":true},{"id":"builtin:moteur","slug":"moteur","name":"Moteur","category":"Puissance","paths":[["c",0.5,0.5,0.43],["t",0.5,0.56,"M"]],"active":true},{"id":"builtin:transformateur","slug":"transformateur","name":"Transformateur","category":"Puissance","paths":[["c",0.3,0.35,0.2],["c",0.3,0.65,0.2],["l",0.56,0.1,0.56,0.9],["c",0.8,0.35,0.18],["c",0.8,0.65,0.18]],"active":true},{"id":"builtin:voyant","slug":"voyant","name":"Voyant lumineux","category":"Signalisation","paths":[["c",0.5,0.5,0.4],["l",0.25,0.25,0.75,0.75],["l",0.25,0.75,0.75,0.25]],"active":true},{"id":"builtin:terre","slug":"terre","name":"Terre de protection","category":"Repérage","paths":[["l",0.5,0,0.5,0.5],["l",0.1,0.5,0.9,0.5],["l",0.25,0.7,0.75,0.7],["l",0.4,0.9,0.6,0.9]],"active":true},{"id":"builtin:bornier","slug":"bornier","name":"Borne","category":"Repérage","paths":[["l",0,0.5,1,0.5],["c",0.5,0.5,0.28]],"active":true},{"id":"builtin:arret-urgence","slug":"arret-urgence","name":"Arrêt d'urgence","category":"Commande","paths":[["c",0.5,0.5,0.43],["l",0.23,0.23,0.77,0.77],["l",0.77,0.23,0.23,0.77]],"active":true}];
 const decode=s=>{try{const a=typeof s==='string'&&s.startsWith(PREFIX)?JSON.parse(s.slice(PREFIX.length)):null;return Array.isArray(a)?a:null}catch{return null}};
 function draw(ctx,list,w,h){for(const o of list){ctx.save();ctx.lineJoin=ctx.lineCap='round';if(o.k==='white'){ctx.fillStyle='#fff';ctx.fillRect(Math.min(o.x,o.x2)*w,Math.min(o.y,o.y2)*h,Math.abs(o.x2-o.x)*w,Math.abs(o.y2-o.y)*h)}else if(o.k==='text'){ctx.fillStyle=o.color||'#30343a';ctx.font='bold '+Math.max(10,w*(o.fontSize||.025))+'px sans-serif';ctx.textBaseline='middle';ctx.fillText(o.text||'',o.x*w,o.y*h)}else if(o.k==='symbol'){renderSym(ctx,o,w,h)}else{ctx.strokeStyle=o.color||'#333';ctx.lineWidth=Math.max(1,w*(o.width||.003));ctx.beginPath();if(o.k==='pen'){(o.pts||[]).forEach((p,i)=>i?ctx.lineTo(p[0]*w,p[1]*h):ctx.moveTo(p[0]*w,p[1]*h))}else{ctx.moveTo(o.x*w,o.y*h);ctx.lineTo(o.x2*w,o.y2*h)}ctx.stroke()}ctx.restore()}}
 
@@ -37,12 +38,12 @@ const actions=E('div',undefined,'ew-symbol-actions'),groupBtn=E('button','Groupe
 actions.append(groupBtn,splitBtn,rotateBtn,shrinkBtn,growBtn,deleteBtn);actions.hidden=true;dock.append(actions);
 navigator.append(prev,pageLabel,next);controls.append(minus,zoomLabel,plus,fit);top.append(heading,navigator,controls,close);stage.append(pdfCanvas,ink);viewport.append(stage);
 panel.append(top,viewport,library,dock,info);dock.append(tools,options);backdrop.append(panel);document.body.append(backdrop);document.body.classList.add('ew-editing');
-let pdf,page=1,mode='navigate',items=[],rows=[],own=null,draft=null,dirty=false,busy=false,baseW=1,baseH=1,zoom=1,tx=0,ty=0,pan=null,gesture=null,lastTap=0,inkScale=1,pdfPage=null,renderTask=null,qualityTimer=null,renderSerial=0,selectedId=null,drag=null,symbolCatalog=[];
+let pdf,page=1,mode='navigate',items=[],rows=[],own=null,draft=null,dirty=false,busy=false,baseW=1,baseH=1,zoom=1,tx=0,ty=0,pan=null,gesture=null,lastTap=0,inkScale=1,pdfPage=null,renderTask=null,qualityTimer=null,renderSerial=0,selectedId=null,drag=null,symbolCatalog=[...BUILTIN_SYMBOLS];
 const pointers=new Map();
 const setStatus=(s,error=false)=>{info.textContent=s;info.style.color=error?'#a52b2b':''};
 function selectMode(m){mode=m;if(m!=='select')selectedId=null;refreshSelection();Object.entries(buttons).forEach(([k,b])=>b.classList.toggle('is-active',k===m));options.classList.toggle('is-hidden',m==='navigate');ink.style.cursor=m==='navigate'?'grab':m==='text'?'text':'crosshair';setStatus(m==='navigate'?'Navigation : un doigt pour déplacer, deux pour zoomer.':'Outil actif : '+buttons[m]?.textContent+'. Deux doigts pour naviguer.')}
 const choices=[['✋ Déplacer','navigate'],['☝ Sélection','select'],['▦ Symboles','symbols'],['✎ Crayon','pen'],['／ Trait','line'],['▭ Correcteur','white'],['T Texte','text'],['⌫ Gomme','erase'],['↶ Annuler','undo']];
-for(const [name,k]of choices){const b=E('button',name);b.type='button';buttons[k]=b;tools.append(b);b.onclick=()=>{if(k==='undo'){if(items.length){items.pop();dirty=true;paint();setStatus('Dernière annotation retirée. Enregistrez.')}return}if(k==='symbols'){selectMode('select');library.hidden=false;renderCatalog();return}library.hidden=true;selectMode(k)}}
+for(const [name,k]of choices){const b=E('button',name);b.type='button';buttons[k]=b;tools.append(b);b.onclick=()=>{if(k==='undo'){if(items.length){items.pop();dirty=true;paint();setStatus('Dernière annotation retirée. Enregistrez.')}return}if(k==='symbols'){selectMode('select');library.hidden=false;libForm.replaceChildren();renderCatalog();setStatus('Choisissez un symbole en touchant son dessin.');return}library.hidden=true;selectMode(k)}}
 const byId=id=>items.find(o=>o.id===id);
 const selected=()=>byId(selectedId);
 const members=()=>{const o=selected();return !o?[]:(o.grouped&&o.groupId)?items.filter(q=>q.groupId===o.groupId&&q.grouped):[o]};
@@ -57,10 +58,25 @@ deleteBtn.onclick=()=>{const ids=new Set(members().map(q=>q.id));items=items.fil
 const libHead=E('div',undefined,'ew-symbol-head'),libTitle=E('strong','Bibliothèque de symboles'),libClose=E('button','✕','secondary'),libSearch=E('input'),libList=E('div',undefined,'ew-symbol-list'),libForm=E('div',undefined,'ew-symbol-form');
 libSearch.type='search';libSearch.placeholder='Rechercher…';libHead.append(libTitle,libClose);library.append(libHead,libSearch,libList,libForm);libClose.onclick=()=>{library.hidden=true;libForm.replaceChildren()};
 libSearch.oninput=()=>renderCatalog();
-function renderCatalog(){libList.replaceChildren();const key=libSearch.value.trim().toLowerCase();for(const s of symbolCatalog.filter(s=>s.active!==false&&[s.name,s.category].join(' ').toLowerCase().includes(key))){
-const b=E('button',undefined,'ew-symbol-choice'),canvas=E('canvas');canvas.width=50;canvas.height=50;renderSym(canvas.getContext('2d'),{x:.5,y:.5,w:.8,h:.8,paths:s.paths},50,50);
-b.append(canvas,E('span',s.name+' · '+s.category));b.onclick=()=>showSymbolForm(s);libList.append(b)}
-if(!libList.childNodes.length)libList.append(E('p','Aucun résultat.'))}
+function renderCatalog(){
+libList.replaceChildren();
+const query=libSearch.value.trim().toLocaleLowerCase('fr');
+const matches=symbolCatalog.filter(s=>s.active!==false&&[s.name,s.category,s.slug].join(' ').toLocaleLowerCase('fr').includes(query));
+const categories=[...new Set(matches.map(s=>s.category))];
+for(const category of categories){
+const title=E('h3',category,'ew-symbol-category');libList.append(title);
+const grid=E('div',undefined,'ew-symbol-grid');
+for(const s of matches.filter(s=>s.category===category)){
+const b=E('button',undefined,'ew-symbol-choice'),canvasBox=E('div',undefined,'ew-symbol-preview'),canvas=E('canvas'),caption=E('span',s.name,'ew-symbol-caption');
+b.type='button';b.setAttribute('aria-label','Insérer '+s.name);
+const dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1));canvas.width=Math.round(92*dpr);canvas.height=Math.round(92*dpr);canvas.style.width='92px';canvas.style.height='92px';
+const ctx=canvas.getContext('2d');if(ctx){ctx.scale(dpr,dpr);renderSym(ctx,{x:.5,y:.5,w:.7,h:.7,paths:s.paths,color:'#26333e'},92,92)}
+canvasBox.append(canvas);b.append(canvasBox,caption);b.onclick=()=>showSymbolForm(s);grid.append(b);
+}
+libList.append(grid)
+}
+if(!matches.length)libList.append(E('p','Aucun symbole correspondant. Essayez une autre recherche.','ew-symbol-empty'));
+}
 function showSymbolForm(s){libForm.replaceChildren();const form=E('form'),fields={};
 for(const [key,caption] of [['repere','Repère (10Q1)'],['reference','Référence (A9P22602)'],['fonction','Caractéristiques (C2A)']]){const label=E('label',caption),input=E('input');input.type='text';input.maxLength=90;input.placeholder=caption;fields[key]=input;label.append(input);form.append(label)}
 const submit=E('button','Insérer sur le PDF');submit.type='submit';form.append(submit);libForm.append(E('strong',s.name),form);
@@ -134,7 +150,9 @@ const changePage=async n=>{if(dirty&&!confirm('Modifications non enregistrées. 
 visibility.onchange=()=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?')){visibility.value=visibility.value==='shared'?'personal':'shared';return}load()};
 function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing')}
 close.onclick=end;
-try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[];const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error)setStatus('Bibliothèque indisponible : '+catalog.error.message,true);else symbolCatalog=catalog.data||[];await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
+try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[];const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
+else{const fromDb=catalog.data||[];symbolCatalog=[...fromDb.filter(x=>Array.isArray(x.paths)&&x.paths.length),...BUILTIN_SYMBOLS.filter(x=>!fromDb.some(y=>y.slug===x.slug))];}
+renderCatalog();await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }
 window.EW_PDF_EDITOR={open};
 })();
