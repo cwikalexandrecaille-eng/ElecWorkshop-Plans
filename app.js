@@ -3,7 +3,7 @@
 const cfg=window.EW_CONFIG||{}, app=document.getElementById('app'), sessionBar=document.getElementById('session');
 const configured=cfg.supabaseUrl&&!cfg.supabaseUrl.includes('REMPLACER')&&cfg.supabaseAnonKey&&!cfg.supabaseAnonKey.includes('REMPLACER');
 const sb=configured&&window.supabase?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey):null;
-let currentUser=null, profile=null, tab='home', data={clients:[],end_clients:[],affairs:[],cabinets:[],documents:[],profiles:[],notifications:[],reports:[],annotations:[]}, selectedCabinet=null, lastTouch=Date.now(), activityWasSet=false;
+let currentUser=null, profile=null, tab='home', data={clients:[],end_clients:[],affairs:[],cabinets:[],documents:[],profiles:[],notifications:[],reports:[],annotations:[],correction_requests:[]}, selectedCabinet=null, lastTouch=Date.now(), activityWasSet=false;
 const $=(s,scope=document)=>scope.querySelector(s), $$=(s,scope=document)=>[...scope.querySelectorAll(s)];
 const esc=v=>String(v??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const uuid=()=>crypto.randomUUID(), short=v=>String(v||'').slice(0,8), fmt=v=>v?new Date(v).toLocaleString('fr-FR'):'—';
@@ -58,16 +58,21 @@ function showLogin(){sessionBar.innerHTML='';if(!sb){main('<section class="card 
  $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const r=await sb.auth.signInWithPassword({email:String(f.get('username')||'').trim().toLowerCase()+'@elecworkshop.invalid',password:f.get('password')});if(r.error)throw r.error;await signedIn()}catch(ex){$('#loginError').hidden=false;$('#loginError').textContent=ex.message}}}
 async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user){showLogin();return}currentUser=s.data.user;
  const r=await sb.from('profiles').select('*').eq('id',currentUser.id).single();if(r.error||!r.data?.active){await sb.auth.signOut();showLogin();alertBox('Compte sans profil actif : contactez l’administrateur.',true);return}profile=r.data;lastTouch=Date.now();if(!activityWasSet){['click','keydown','touchstart','pointermove','scroll'].forEach(ev=>window.addEventListener(ev,()=>{lastTouch=Date.now()},{passive:true}));activityWasSet=true}
- await loadAll();render()}
-async function loadAll(){let tables=['clients','end_clients','affairs','cabinets','documents','profiles','notifications','reports','annotations'];const results=await Promise.all(tables.map(async t=>[t,await q(t)]));for(const [t,rows]of results)data[t]=rows}
+ await loadAll();
+ const correctionId=new URL(location.href).searchParams.get('correction');
+ if(correctionId)tab='notifications';
+ render();
+ if(correctionId)openCorrectionRequest(correctionId,true)
+}
+async function loadAll(){let tables=['clients','end_clients','affairs','cabinets','documents','profiles','notifications','reports','annotations','correction_requests'];const results=await Promise.all(tables.map(async t=>[t,await q(t)]));for(const [t,rows]of results)data[t]=rows}
 async function refresh(){await loadAll();render()}
 function render(){if(!currentUser)return showLogin();sessionBar.innerHTML='';
  const nav=[['home','home','Accueil'],['folders','folder','Dossiers'],['documents','file','Documents'],['annotations','pen','Annotations'],['account','user','Compte']];
  const extra=[['reports','message','Signalements'],['notifications','bell','Notifications'],['backup','database','Sauvegardes']];
- const tabs=[...nav,...extra],selected=tabs.find(x=>x[0]===tab)||nav[0],notifCount=data.notifications.filter(n=>n.recipient_id===currentUser.id&&!n.read_at).length;
+ const tabs=[...nav,...extra],selected=tabs.find(x=>x[0]===tab)||nav[0],notifCount=data.notifications.filter(n=>n.recipient_id===currentUser.id&&!n.is_read).length;
  main(`<div class="ew-app"><aside class="ew-sidebar"><div class="ew-logo"><img src="./icon.svg" alt="" class="ew-app-logo" width="34" height="34"><span><strong>ElecWorkshop</strong><small>Plans</small></span></div><span class="ew-menu-caption">ESPACE DE TRAVAIL</span><nav class="ew-side-nav">${tabs.map(t=>`<button class="${tab===t[0]?'active':''}" data-tab="${t[0]}">${ewIcon(t[1],20)} <span>${t[2]}</span></button>`).join('')}</nav><div class="ew-side-user">${ewIcon('user',20)} <span>${esc(profile.full_name)}<small>${esc(profile.role)}</small></span></div></aside><div class="ew-app-main"><div class="ew-header"><div class="ew-header-brand"><img src="./icon.svg" alt="" class="ew-app-logo" width="34" height="34"><span><strong>ElecWorkshop</strong> Plans</span></div><div class="ew-header-actions"><button class="ew-icon-button" id="ew-notifs" aria-label="Notifications">${ewIcon('bell',23)}${notifCount?'<span class="ew-notif-dot"></span>':''}</button><button class="ew-icon-button" id="ew-account" aria-label="Compte">${ewIcon('user',23)}</button></div></div><main class="ew-content" id="view"></main></div><nav class="ew-bottom-nav" aria-label="Navigation principale">${nav.map(t=>`<button class="${tab===t[0]?'active':''}" data-tab="${t[0]}">${ewIcon(t[1],22)}<span>${t[2]}</span></button>`).join('')}</nav></div>`);
  $$('[data-tab]').forEach(el=>el.onclick=()=>{tab=el.dataset.tab;render()});
- $('#ew-notifs').onclick=()=>{tab='notifications';render()};$('#ew-account').onclick=()=>{tab='account';render()};
+ $('#ew-notifs').onclick=async()=>{tab='notifications';render();await refreshNotificationList()};$('#ew-account').onclick=()=>{tab='account';render()};
  const pages={home:renderHome,folders:renderFolders,documents:renderDocuments,annotations:renderAnnotations,account:renderAccount,reports:renderReports,notifications:renderNotifications,backup:renderBackup};
  (pages[tab]||renderHome)();}
 function renderHome(){const v=$('#view');
@@ -102,16 +107,26 @@ function openCreateAffair(){if(!isCreator())return;let stage=0,model={client:'',
 function renderCabinet(){tab='folders';render();const c=cabinetById(selectedCabinet);if(!c)return;const a=affairById(c.affair_id),cl=data.clients.find(x=>x.id===a?.client_id),docs=data.documents.filter(x=>x.cabinet_id===c.id),container=$('#view');
  const nameOfStatus=s=>({published:'publié',archived:'archivé',draft:'brouillon',trashed:'corbeille'}[s]||s);
  container.innerHTML=`<div class="ew-breadcrumb"><button id="back">${ewIcon('home',17)}</button><span>${esc(cl?.name||'Client')}</span>${ewIcon('chevron',14)}<span>${esc(a?.year||'')}</span>${ewIcon('chevron',14)}<span>${esc(a?.name||'Affaire')}</span>${ewIcon('chevron',14)}<strong>${esc(c.name)}</strong></div>
- <div class="ew-cab-identity"><span class="ew-cab-avatar">${ewIcon('cabinet',44)}</span><span><h1>${esc(c.name)}</h1><p>Armoire électrique</p><small>Projet : ${esc(a?.name)} · Année : ${esc(a?.year)} · Client : ${esc(cl?.name)}</small></span></div>
+ <div class="ew-cab-identity"><span class="ew-cab-avatar">${ewIcon('cabinet',44)}</span><span><h1>${esc(c.name)}</h1><p>Armoire électrique</p><small>Projet : ${esc(a?.name)} · Année : ${esc(a?.year)} · Client : ${esc(cl?.name)}</small><p>Référent · ${esc(data.profiles.find(p=>p.id===a?.referent_id&&p.active)?.full_name||'À affecter')}</p>${a&&['admin','chef'].includes(profile?.role)?'<button class="secondary" id="assignReferent">Affecter le référent</button>':''}</span></div>
  <section class="ew-qr-group"><div class="ew-qr-box"><h2>QR code armoire</h2><div class="ew-qr-box-inner"><div class="qrwrap" id="qr"></div><p>Identifie l'armoire et donne accès à la documentation publiée.</p></div><a id="publicLink" class="ew-subtle-link" target="_blank" rel="noopener">Voir la page client ${ewIcon('arrow',16)}</a></div><div class="ew-label-box"><button id="wmf">${ewIcon('download',27)}<strong>Exporter l'étiquette WMF</strong></button><div class="ew-label-secondary"><button class="secondary" id="svg">QR SVG</button><button class="secondary" id="png">PNG</button></div></div></section>
  <section class="ew-section ew-doc-section"><div class="ew-section-header"><h2>${ewIcon('file',22)} Documents</h2>${isCreator()?'<button id="upload">+ Ajouter un document</button>':''}</div><div class="ew-doc-list" id="cDocs"></div></section>
  <section class="ew-more"><button id="seeAnnotations">${ewIcon('pen',21)}<span>Annotations</span><small>${data.annotations.filter(n=>docs.some(d=>d.id===n.document_id)).length}</small>${ewIcon('chevron',18)}</button><button id="seeReports">${ewIcon('message',21)}<span>Signalements</span><small>${data.reports.filter(r=>r.cabinet_id===c.id).length}</small>${ewIcon('chevron',18)}</button></section><div class="ew-qr-extra"><div id="labelQr"></div></div>`;
  makeQr($('#qr'),publicUrl(c),154);makeQr($('#labelQr'),publicUrl(c),112);$('#publicLink').href=publicUrl(c);
  $('#back').onclick=renderFolders;$('#svg').onclick=()=>exportSvgQr(c);$('#wmf').onclick=()=>exportWmf(c);$('#png').onclick=()=>exportPng(c);
  if($('#upload'))$('#upload').onclick=()=>openUpload(c);
+ if($('#assignReferent'))$('#assignReferent').onclick=()=>assignReferent(a);
  $('#seeAnnotations').onclick=()=>{tab='annotations';render()};$('#seeReports').onclick=()=>{tab='reports';render()};
  $('#cDocs').innerHTML=docs.map(d=>`<div class="ew-document"><span class="ew-pdf-logo">${ewIcon('file',31)}<small>PDF</small></span><div class="ew-doc-content"><strong>${esc(d.filename)}</strong><div class="ew-doc-sub">Rév. ${esc(String(d.revision||'').toUpperCase())} · ${fmt(d.created_at)}</div><span class="ew-status ${d.status==='published'?'is-live':''}">${nameOfStatus(d.status)}</span><div class="ew-doc-buttons"><button class="secondary" data-openpdf="${d.id}">Consulter</button>${isManager()&&d.status==='draft'?`<button data-publish="${d.id}">Publier</button><button class="secondary" data-trash="${d.id}">Corbeille</button>`:''}</div></div></div>`).join('')||'<p class="ew-empty">Aucun PDF pour le moment. Le QR code fonctionne déjà.</p>';
  $$('[data-openpdf]').forEach(b=>b.onclick=()=>openDocument(b.dataset.openpdf));$$('[data-publish]').forEach(b=>b.onclick=()=>publishDocument(b.dataset.publish));$$('[data-trash]').forEach(b=>b.onclick=()=>trashDocument(b.dataset.trash))}
+function assignReferent(affair){
+ const choices=data.profiles.filter(p=>p.active&&p.role==='referent');
+ if(!choices.length){alertBox('Aucun compte référent actif. Créez le compte du référent avant de l’affecter.',true);return}
+ const m=modal(`<h2>Référent de l’affaire</h2><p>${esc(affair.name)}</p><form><label for="referentChoice">Référent</label><select id="referentChoice" required><option value="">Choisir un référent</option>${choices.map(p=>`<option value="${esc(p.id)}" ${p.id===affair.referent_id?'selected':''}>${esc(p.full_name)}</option>`).join('')}</select><button>Enregistrer</button></form>`);
+ $('form',m).onsubmit=async e=>{
+  e.preventDefault();const button=$('form button',m);button.disabled=true;
+  try{await update('affairs',{referent_id:$('#referentChoice',m).value},affair.id);await refresh();m.remove();renderCabinet()}catch(err){error(err)}finally{button.disabled=false}
+ }
+}
 function openAddCabinet(a){const m=modal(`<h2>Ajouter une armoire à ${esc(a.name)}</h2><label>Nom de l'armoire ou du coffret</label><input id="extraName" placeholder="Ex. : TD3"><button id="saveExtra">Créer et générer le QR code</button>`);$('#saveExtra',m).onclick=async()=>{try{const n=$('#extraName',m).value.trim();if(!n)throw Error('Nom obligatoire');await add('cabinets',{affair_id:a.id,name:n});m.remove();await refresh();alertBox('Armoire et QR créés')}catch(e){error(e)}}}
 function renderDocuments(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>DOCUMENTS</small><h1>Bibliothèque des schémas</h1><p>${data.documents.length} PDF enregistrés</p></div></div><div class="ew-doc-list">${data.documents.map(d=>`<div class="ew-document"><span class="ew-pdf-logo">${ewIcon('file',28)}<small>PDF</small></span><div class="ew-doc-content"><strong>${esc(d.filename)}</strong><div class="ew-doc-sub">${esc(cabinetName(d.cabinet_id))} · Rév. ${esc(String(d.revision||'').toUpperCase())}</div><span class="ew-status ${d.status==='published'?'is-live':''}">${esc(d.status)}</span><div class="ew-doc-buttons"><button class="secondary" data-openpdf="${d.id}">Consulter</button></div></div></div>`).join('')||'<p class="ew-empty">Aucun document disponible.</p>'}</div>`;$$('[data-openpdf]').forEach(b=>b.onclick=()=>openDocument(b.dataset.openpdf))}
 function isDrawing(annotation){return String(annotation?.content||'').startsWith('EW_DRAW_V1:')}
@@ -121,16 +136,87 @@ function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-t
 
 function openUpload(c){const m=modal(`<h2>Importer un PDF — ${esc(c.name)}</h2><p class="warning">Le document sera un brouillon, invisible des clients jusqu'à publication.</p><form id="uploadForm"><label>Fichier PDF (max 50 Mo)</label><input type="file" accept="application/pdf,.pdf" id="file" required><label>Révision</label><input id="rev" value="A" required><button id="sendFile">Importer</button></form>`);$('#uploadForm',m).onsubmit=async e=>{e.preventDefault();const file=$('#file',m).files[0];if(!file||file.type!=='application/pdf'||file.size>52428800)return alert('Choisissez un fichier PDF de 50 Mo maximum.');try{$('#sendFile',m).disabled=true;const path=`${c.id}/${uuid()}.pdf`;const up=await sb.storage.from('plans-drafts').upload(path,file,{contentType:'application/pdf'});if(up.error)throw up.error;await add('documents',{cabinet_id:c.id,revision:$('#rev',m).value.trim(),filename:file.name,storage_path:path,uploader_id:currentUser.id,status:'draft'});m.remove();await refresh();selectedCabinet=c.id;renderCabinet();alertBox('PDF brouillon importé. Publication requise.')}catch(e){error(e);$('#sendFile',m).disabled=false}}}
 async function docUrl(d){if(d.status==='published'||d.status==='archived')return publicPdfUrl(d.storage_path);const r=await sb.storage.from('plans-drafts').createSignedUrl(d.storage_path,3600);if(r.error)throw r.error;return r.data.signedUrl}
-async function openDocument(id){const d=data.documents.find(x=>x.id===id);if(!d)return;try{const url=await docUrl(d),m=modal(`<h2>${esc(d.filename)} — Rév. ${esc(d.revision)}</h2><p class="muted">${esc(cabinetName(d.cabinet_id))} · ${esc(d.status)}</p><iframe class="preview" title="Document PDF" src="${esc(url)}"></iframe><div class="toolbar"><a class="btn secondary" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir / télécharger PDF</a><button id="editDrawing">✎ Modifier le schéma</button><button id="newAnnotation">+ Annotation</button><button id="newReport">+ Signalement</button><button id="exportNotes" class="secondary">Exporter avec commentaires</button></div><div id="notesArea"></div>`);
- $('#editDrawing',m).onclick=()=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,onClose:()=>drawNotes(d,m)});$('#newAnnotation',m).onclick=()=>openAnnotation(d,m);$('#newReport',m).onclick=()=>openReport(d,m);$('#exportNotes',m).onclick=()=>exportAnnotated(d);drawNotes(d,m)
+async function openDocument(id){const d=data.documents.find(x=>x.id===id);if(!d)return;try{const url=await docUrl(d),m=modal(`<h2>${esc(d.filename)} — Rév. ${esc(d.revision)}</h2><p class="muted">${esc(cabinetName(d.cabinet_id))} · ${esc(d.status)}</p><iframe class="preview" title="Document PDF" src="${esc(url)}"></iframe><div class="toolbar"><a class="btn secondary" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir / télécharger PDF</a><button id="editDrawing">✎ Modifier le schéma</button><button id="sendCorrections" class="secondary">Envoyer au référent</button><button id="newAnnotation">+ Annotation</button><button id="newReport">+ Signalement</button><button id="exportNotes" class="secondary">Exporter avec commentaires</button></div><div id="notesArea"></div>`);
+ $('#editDrawing',m).onclick=()=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,onClose:()=>drawNotes(d,m),onSubmitCorrections:()=>submitCorrectionRequest(d)});$('#sendCorrections',m).onclick=async e=>{const button=e.currentTarget;button.disabled=true;try{alertBox(await submitCorrectionRequest(d))}catch(err){error(err)}finally{button.disabled=false}};$('#newAnnotation',m).onclick=()=>openAnnotation(d,m);$('#newReport',m).onclick=()=>openReport(d,m);$('#exportNotes',m).onclick=()=>exportAnnotated(d);drawNotes(d,m)
  }catch(e){error(e)}}
 async function drawNotes(d,m){try{const r=await sb.from('annotations').select('*').eq('document_id',d.id).order('created_at',{ascending:false});if(r.error)throw r.error;const notes=r.data||[];$('#notesArea',m).innerHTML=`<h3>Annotations de cette révision (${notes.length})</h3>`+notes.map(n=>`<div class="note"><div class="row between"><b>Page ${n.page} · ${n.visibility==='shared'?'Partagée':n.visibility==='personal'?'Personnelle':esc(n.visibility)}</b><span class="pill">${n.status==='closed'?'Traitée':n.status==='open'?'À traiter':esc(n.status)}</span></div>${isDrawing(n)?`<button class="secondary" data-correction-page="${esc(n.page)}">Voir les corrections</button>`:`<p>${esc(n.content)}</p>`}<p class="small muted">${fmt(n.created_at)}</p>${isManager()&&n.status==='open'?`<button class="secondary" data-close-note="${n.id}">Marquer traitée</button>`:''}<button class="secondary" data-convert-note="${n.id}">Convertir en signalement</button></div>`).join('');$$('[data-correction-page]',m).forEach(b=>b.onclick=()=>openCorrections(d.id,b.dataset.correctionPage));$$('[data-close-note]',m).forEach(b=>b.onclick=async()=>{try{await update('annotations',{status:'closed'},b.dataset.closeNote);drawNotes(d,m)}catch(e){error(e)}});$$('[data-convert-note]',m).forEach(b=>b.onclick=()=>{const n=notes.find(x=>x.id===b.dataset.convertNote);if(n&&(n.author_id===currentUser.id||profile?.role==='referent'))openReport(d,m,n);else alert('Conversion réservée à l’auteur ou au référent')})}catch(e){error(e)}}
 function openAnnotation(d,parent){const m=modal(`<h2>Nouvelle annotation — ${esc(d.filename)}</h2><form id="annoForm"><label>Page</label><input type="number" min="1" value="1" id="annoPage" required><label>Commentaire</label><textarea id="annoText" required placeholder="Repère, erreur constatée, correction…"></textarea><label>Visibilité</label><select id="annoVisibility"><option value="personal">Personnelle</option><option value="shared">Partagée (alerte au référent)</option></select><button>Enregistrer l’annotation</button></form>`);$('#annoForm',m).onsubmit=async e=>{e.preventDefault();try{await add('annotations',{document_id:d.id,author_id:currentUser.id,page:+$('#annoPage',m).value,content:$('#annoText',m).value.trim(),visibility:$('#annoVisibility',m).value});m.remove();drawNotes(d,parent);alertBox('Annotation enregistrée')}catch(e){error(e)}}}
 function openReport(d,parent,annotation=null){const affair=affairById(cabinetById(d.cabinet_id)?.affair_id),m=modal(`<h2>Signaler un problème</h2><form id="reportForm"><label>Titre</label><input id="reportTitle" required value="${esc(isDrawing(annotation)?'Corrections du schéma':annotation?'Annotation à traiter':'')}"><label>Description</label><textarea id="reportBody">${esc(isDrawing(annotation)?'':annotation?.content||'')}</textarea><label>Priorité</label><select id="priority"><option value="normal">Normale</option><option value="important">Importante</option><option value="urgent">Urgente</option></select><p class="muted small">Destinataire automatique : référent de l'affaire ${esc(affair?.name)}</p><button>Envoyer au référent</button></form>`);$('#reportForm',m).onsubmit=async e=>{e.preventDefault();try{await add('reports',{cabinet_id:d.cabinet_id,document_id:d.id,annotation_id:annotation?.id||null,author_id:currentUser.id,referent_id:affair?.referent_id||null,title:$('#reportTitle',m).value,body:$('#reportBody',m).value,priority:$('#priority',m).value});m.remove();await refresh();alertBox('Signalement créé dans le logiciel. E-mail et push à configurer séparément.')}catch(e){error(e)}}}
 async function publishDocument(id){const d=data.documents.find(x=>x.id===id);if(!d||!isManager())return;if(!confirm(`Publier officiellement « ${d.filename} » ?`))return;try{const src=await sb.storage.from('plans-drafts').download(d.storage_path);if(src.error)throw src.error;const target=`${d.cabinet_id}/${d.id}.pdf`;const up=await sb.storage.from('plans-public').upload(target,src.data,{contentType:'application/pdf',upsert:false});if(up.error)throw up.error;const r=await sb.rpc('publish_document',{p_id:d.id,p_public_path:target});if(r.error)throw r.error;await refresh();selectedCabinet=d.cabinet_id;renderCabinet();alertBox('Révision publiée. Accessible depuis le QR code.')}catch(e){error(e)}}
 async function trashDocument(id){if(!confirm('Déplacer ce brouillon dans la corbeille ?'))return;try{const r=await sb.rpc('trash_draft',{p_id:id});if(r.error)throw r.error;await refresh();renderCabinet()}catch(e){error(e)}}
-function renderReports(){const v=$('#view');v.innerHTML=`<section class="card"><h2>Signalements</h2><div id="reportsList"></div></section>`;$('#reportsList').innerHTML=data.reports.map(r=>{const note=data.annotations.find(n=>n.id===r.annotation_id);const drawing=isDrawing(note)||isDrawing({content:r.body});return `<div class="item"><div class="row between"><b>${esc(r.title)}</b><span class="pill">${esc(r.status)} · ${esc(r.priority)}</span></div><p>${isDrawing({content:r.body})?'Corrections graphiques du schéma':esc(r.body)}</p>${drawing&&data.documents.some(d=>d.id===r.document_id)?`<button class="secondary" data-report-corrections="${esc(r.document_id)}" data-correction-page="${esc(note?.page||1)}">Voir les corrections</button>`:''}<p class="small muted">${esc(cabinetName(r.cabinet_id))} · ${fmt(r.created_at)}</p>${isManager()?`<select data-report-status="${r.id}"><option value="">Changer le statut…</option><option value="progress">En cours</option><option value="accepted">Accepté</option><option value="rejected">Refusé</option><option value="closed">Clôturé</option></select>`:''}</div>`}).join('')||'<div class="empty">Aucun signalement.</div>';$$('[data-report-corrections]',v).forEach(b=>b.onclick=()=>openCorrections(b.dataset.reportCorrections,b.dataset.correctionPage));$$('[data-report-status]').forEach(el=>el.onchange=async()=>{if(!el.value)return;try{await update('reports',{status:el.value},el.dataset.reportStatus);await refresh()}catch(e){error(e)}})}
-function renderNotifications(){const v=$('#view');const notes=data.notifications.filter(n=>n.recipient_id===currentUser.id);v.innerHTML=`<section class="card"><h2>Notifications dans le logiciel</h2>${notes.length?notes.map(n=>`<div class="item"><b>${esc(n.kind)}</b><p>${esc(n.body)}</p><small>${fmt(n.created_at)}</small></div>`).join(''):'<div class="empty">Aucune notification pour le moment.</div>'}<p class="muted small">L’envoi push et e-mail nécessite un service de notification côté serveur, non activé dans cette base statique.</p></section>`}
+function renderReports(){const v=$('#view');v.innerHTML=`<section class="card"><h2>Corrections de schémas</h2><div id="correctionRequests"></div></section><section class="card"><h2>Signalements</h2><div id="reportsList"></div></section>`;renderCorrectionRequests(v);$('#reportsList').innerHTML=data.reports.map(r=>{const note=data.annotations.find(n=>n.id===r.annotation_id);const drawing=isDrawing(note)||isDrawing({content:r.body});return `<div class="item"><div class="row between"><b>${esc(r.title)}</b><span class="pill">${esc(r.status)} · ${esc(r.priority)}</span></div><p>${isDrawing({content:r.body})?'Corrections graphiques du schéma':esc(r.body)}</p>${drawing&&data.documents.some(d=>d.id===r.document_id)?`<button class="secondary" data-report-corrections="${esc(r.document_id)}" data-correction-page="${esc(note?.page||1)}">Voir les corrections</button>`:''}<p class="small muted">${esc(cabinetName(r.cabinet_id))} · ${fmt(r.created_at)}</p>${isManager()?`<select data-report-status="${r.id}"><option value="">Changer le statut…</option><option value="progress">En cours</option><option value="accepted">Accepté</option><option value="rejected">Refusé</option><option value="closed">Clôturé</option></select>`:''}</div>`}).join('')||'<div class="empty">Aucun signalement.</div>';$$('[data-report-corrections]',v).forEach(b=>b.onclick=()=>openCorrections(b.dataset.reportCorrections,b.dataset.correctionPage));$$('[data-report-status]').forEach(el=>el.onchange=async()=>{if(!el.value)return;try{await update('reports',{status:el.value},el.dataset.reportStatus);await refresh()}catch(e){error(e)}})}
+const correctionStatuses={unseen:'Pas encore vu',progress:'En cours',done:'Réalisé'};
+async function submitCorrectionRequest(d){
+ const result=await sb.rpc('submit_corrections',{p_document_id:d.id});
+ if(result.error)throw result.error;
+ return result.data?'Corrections envoyées au référent.':'Ces corrections ont déjà été envoyées.'
+}
+function openCorrectionRequest(id,showScheme=false){
+ const request=data.correction_requests.find(r=>r.id===id);
+ const d=data.documents.find(doc=>doc.id===request?.document_id);
+ if(!request||!d){alertBox('Cette demande de correction est indisponible.',true);return}
+ const pages=[...new Set(request.pages.map(row=>row.page))];
+ const isReferent=request.referent_id===currentUser.id;
+ const m=modal(`<h2>${esc(d.filename)} · Rév. ${esc(d.revision)}</h2>
+ <p>${esc(cabinetName(d.cabinet_id))} · ${fmt(request.submitted_at)}</p>
+ <p class="pill">${esc(correctionStatuses[request.status])}</p>
+ <h3>Pages corrigées</h3><div class="toolbar">${pages.map(page=>`<button type="button" class="secondary" data-review-page="${esc(page)}">Page ${esc(page)}</button>`).join('')}</div>
+ ${isReferent?`<form id="correctionStatus"><label for="correctionStatusValue">Statut</label><select id="correctionStatusValue">${Object.entries(correctionStatuses).map(([value,label])=>`<option value="${value}" ${value===request.status?'selected':''}>${label}</option>`).join('')}</select><button>Enregistrer le statut</button><div id="correctionError" class="error" hidden></div></form>`:''}`);
+ const viewPage=page=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,initialPage:page,readOnly:true,annotationRows:request.pages});
+ $$('[data-review-page]',m).forEach(b=>b.onclick=()=>viewPage(b.dataset.reviewPage));
+ if(showScheme&&pages.length)viewPage(pages[0]);
+ if(!isReferent)return;
+ $('#correctionStatus',m).onsubmit=async e=>{
+  e.preventDefault();
+  const form=e.currentTarget,button=form.querySelector('button'),message=$('#correctionError',form);
+  button.disabled=true;message.hidden=true;
+  try{
+   const result=await sb.rpc('set_correction_status',{p_id:id,p_status:$('#correctionStatusValue',form).value,p_submitted_at:request.submitted_at});
+   if(result.error)throw result.error;
+   await refresh();m.remove();alertBox('Statut enregistré.');
+  }catch(err){message.textContent=err.message;message.hidden=false}finally{button.disabled=false}
+ }
+}
+function renderCorrectionRequests(v){
+ const list=$('#correctionRequests',v);
+ list.innerHTML=data.correction_requests.slice().sort((a,b)=>b.submitted_at.localeCompare(a.submitted_at)).map(r=>{
+  const d=data.documents.find(doc=>doc.id===r.document_id);
+  return `<div class="item"><b>${esc(d?.filename||'Schéma')}</b><p>${esc(correctionStatuses[r.status])} · ${fmt(r.submitted_at)}</p><button class="secondary" data-review-request="${esc(r.id)}">Voir la demande</button></div>`
+ }).join('')||'<p class="muted">Aucune demande pour le moment.</p>';
+ $$('[data-review-request]',list).forEach(b=>b.onclick=async()=>{
+  try{data.correction_requests=await q('correction_requests');openCorrectionRequest(b.dataset.reviewRequest)}catch(err){error(err)}
+ })
+}
+async function refreshNotificationList(){
+ const userId=currentUser?.id;
+ if(!userId||document.hidden)return;
+ try{
+  const notes=await q('notifications');
+  if(currentUser?.id!==userId)return;
+  data.notifications=notes;
+  const bell=$('#ew-notifs'),dot=$('.ew-notif-dot',bell||document);
+  if(dot&&!notes.some(n=>!n.is_read))dot.remove();
+  if(bell&&!dot&&notes.some(n=>!n.is_read)){const badge=document.createElement('span');badge.className='ew-notif-dot';bell.append(badge)}
+  if(tab==='notifications'&&$('#view'))renderNotifications();
+ }catch(err){console.error(err)}
+}
+function renderNotifications(){
+ const v=$('#view');
+ const notes=data.notifications.filter(n=>n.recipient_id===currentUser.id).sort((a,b)=>b.created_at.localeCompare(a.created_at));
+ v.innerHTML=`<section class="card"><h2>Notifications</h2>${notes.length?notes.map(n=>{
+  const id=n.kind==='correction_schema'&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
+  return `<div class="item"><b>${id?'Schéma modifié':esc(n.kind)}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body)}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}">Ouvrir le schéma modifié</button></div>`:''}</div>`
+ }).join(''):'<div class="empty">Aucune notification pour le moment.</div>'}</section>`;
+ $$('[data-notice]',v).forEach(b=>b.onclick=async()=>{
+  b.disabled=true;
+  try{
+   data.correction_requests=await q('correction_requests');
+   openCorrectionRequest(b.dataset.noticeRequest,true);
+   if(notes.some(n=>n.id===b.dataset.notice&&!n.is_read))await update('notifications',{is_read:true},b.dataset.notice);
+   await refreshNotificationList();
+  }catch(err){error(err)}finally{b.disabled=false}
+ })
+}
 function renderBackup(){const v=$('#view');v.innerHTML=`<section class="card"><h2>Sauvegarde de vos données</h2><p>Export JSON de vos projets, armoires, documents (métadonnées), annotations et signalements. Les fichiers PDF doivent être sauvegardés séparément.</p><button id="backupExport">Exporter les données JSON</button><p class="warning">L'import doit être contrôlé : une restauration automatique de données partagées peut écraser les informations d'autres utilisateurs. La V1 fournit un import de vérification sans écriture en base.</p><label>Vérifier une sauvegarde JSON</label><input type="file" id="backupImport" accept="application/json,.json"><pre id="backupInfo" class="muted"></pre></section>`;$('#backupExport').onclick=()=>downloads('elecworkshop-sauvegarde-'+new Date().toISOString().slice(0,10)+'.json',new Blob([JSON.stringify({version:1,exported_at:new Date().toISOString(),data},null,2)],{type:'application/json'}));$('#backupImport').onchange=async e=>{try{const f=e.target.files[0],x=JSON.parse(await f.text());if(x.version!==1||!x.data?.cabinets)throw Error('Fichier incompatible');$('#backupInfo').textContent=`Sauvegarde valide : ${x.data.affairs?.length||0} affaires, ${x.data.cabinets?.length||0} armoires. Restauration non appliquée.`}catch(e){error(e)}}}
 function qrModules(c){const div=document.createElement('div');div.style.cssText='position:absolute;left:-9999px;top:-9999px';document.body.appendChild(div);makeQr(div,publicUrl(c),330);const canvas=$('canvas',div);if(!canvas){div.remove();throw Error('Génération QR indisponible')}const ctx=canvas.getContext('2d'),size=canvas.width,img=ctx.getImageData(0,0,size,size),n=Math.round(size/10);const moduleCount=(()=>{for(let i=21;i<=177;i+=4){if(size%i===0)return i}return 33})(); // replaced by sampling with robust finder below
  // Find transitions on first row of finder (7 dark modules plus quiet edges). QRCode draws QR without quiet zone.
@@ -166,6 +252,7 @@ async function init(){if(!sb){main('<section class="card"><h1>Configuration requ
  const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
  // 15-minute inactivity window; background switch is not activity.
  setInterval(async()=>{if(currentUser&&Date.now()-lastTouch>15*60*1000){await sb.auth.signOut();currentUser=null;profile=null;showLogin();alertBox('Session terminée après 15 minutes d’inactivité.')}},15000);
+ setInterval(refreshNotificationList,30000);document.addEventListener('visibilitychange',refreshNotificationList);
  window.addEventListener('online',()=>{if(currentUser)alertBox('Connexion Internet retrouvée.')})
 }
 init().catch(error);

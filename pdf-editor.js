@@ -25,7 +25,7 @@ if(o.k==='text')return x>=o.x-.016&&x<=o.x+Math.max(.045,String(o.text||'').leng
 return hit(o,x,y)}
 
 function hit(o,x,y){if(o.k==='white')return x>=Math.min(o.x,o.x2)-.025&&x<=Math.max(o.x,o.x2)+.025&&y>=Math.min(o.y,o.y2)-.025&&y<=Math.max(o.y,o.y2)+.025;if(o.k==='text')return Math.abs(o.x-x)<.22&&Math.abs(o.y-y)<.045;if(o.k==='line'){const dx=o.x2-o.x,dy=o.y2-o.y,t=clamp(((x-o.x)*dx+(y-o.y)*dy)/(dx*dx+dy*dy||1));return Math.hypot(x-o.x-t*dx,y-o.y-t*dy)<.025}return(o.pts||[]).some(p=>Math.hypot(x-p[0],y-p[1])<.025)}
-async function open({sb,document:doc,user,docUrl,initialPage=1,readOnly=false,onClose}){
+async function open({sb,document:doc,user,docUrl,initialPage=1,readOnly=false,onClose,annotationRows,onSubmitCorrections}){
 if(!window.pdfjsLib){alert('Lecteur PDF indisponible.');return}
 window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const backdrop=E('div',undefined,'ew-editor-backdrop'),panel=E('div',undefined,'ew-editor-panel'),top=E('header',undefined,'ew-editor-head'),heading=E('div',doc.filename+' · Rév. '+doc.revision,'ew-editor-title'),close=E('button','✕','secondary');
@@ -49,6 +49,14 @@ const setStatus=(s,error=false)=>{info.textContent=s;info.style.color=error?'#a5
 function selectMode(m){mode=m;if(m!=='select')selectedId=null;refreshSelection();Object.entries(buttons).forEach(([k,b])=>b.classList.toggle('is-active',k===m));options.classList.toggle('is-hidden',m==='navigate');ink.style.cursor=m==='navigate'?'grab':m==='text'?'text':'crosshair';setStatus(m==='navigate'?'Navigation : un doigt pour déplacer, deux pour zoomer.':'Outil actif : '+buttons[m]?.textContent+'. Deux doigts pour naviguer.')}
 const choices=[['✋ Déplacer','navigate'],['☝ Sélection','select'],['▦ Symboles','symbols'],['✎ Crayon','pen'],['／ Trait','line'],['▭ Correcteur','white'],['T Texte','text'],['⌫ Gomme','erase'],['↶ Annuler','undo']];
 for(const [name,k]of choices){const b=E('button',name);b.type='button';buttons[k]=b;tools.append(b);b.onclick=()=>{if(k==='undo'){if(items.length){items.pop();dirty=true;paint();setStatus('Dernière annotation retirée. Enregistrez.')}return}if(k==='symbols'){selectMode('select');library.hidden=false;library.classList.remove('ew-symbol-detail-open');libForm.replaceChildren();libSearch.hidden=false;libList.hidden=false;library.scrollTop=0;renderCatalog();setStatus('Choisissez un symbole en touchant son dessin.');return}library.hidden=true;selectMode(k)}}
+if(onSubmitCorrections&&!readOnly){
+const send=E('button','Envoyer au référent','secondary');send.type='button';tools.insertBefore(send,buttons.pen);
+send.onclick=async()=>{
+if(dirty){setStatus('Enregistre les corrections avant de les envoyer.',true);return}
+send.disabled=true;
+try{setStatus(await onSubmitCorrections())}catch(e){setStatus(e.message,true)}finally{send.disabled=false}
+};
+}
 const byId=id=>items.find(o=>o.id===id);
 const selected=()=>byId(selectedId);
 const members=()=>{const o=selected();return !o?[]:(o.grouped&&o.groupId)?items.filter(q=>q.groupId===o.groupId&&q.grouped):[o]};
@@ -165,7 +173,7 @@ const changePage=async n=>{if(dirty&&!confirm('Modifications non enregistrées. 
 visibility.onchange=()=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?')){visibility.value=visibility.value==='shared'?'personal':'shared';return}load()};
 function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing');onClose?.()}
 close.onclick=end;
-try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[];page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){await renderPage();selectMode('navigate');return}const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
+try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;if(annotationRows){rows=annotationRows}else{const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[]}page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){await renderPage();selectMode('navigate');return}const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
 else{const fromDb=catalog.data||[];symbolCatalog=[...fromDb.filter(x=>Array.isArray(x.paths)&&x.paths.length),...BUILTIN_SYMBOLS.filter(x=>!fromDb.some(y=>y.slug===x.slug))];}
 renderCatalog();await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }
