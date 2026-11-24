@@ -88,10 +88,11 @@ async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user
 }
 async function loadAll(){let tables=['clients','end_clients','affairs','cabinets','documents','profiles','notifications','reports','annotations','correction_requests'];const results=await Promise.all(tables.map(async t=>[t,await q(t)]));for(const [t,rows]of results)data[t]=rows;
  recycleBin=[
-   ...data.profiles.filter(p=>p.trashed_at).map(p=>({kind:'account',id:p.id,name:p.full_name,date:p.trashed_at})),
+   ...data.profiles.filter(p=>p.trashed_at&&!p.purged_at).map(p=>({kind:'account',id:p.id,name:p.full_name,date:p.trashed_at})),
    ...data.affairs.filter(a=>a.trashed_at).map(a=>({kind:'affair',id:a.id,name:a.name,date:a.trashed_at})),
-   ...data.cabinets.filter(c=>c.trashed_at).map(c=>({kind:'cabinet',id:c.id,name:c.name,date:c.trashed_at,context:data.affairs.find(a=>a.id===c.affair_id)?.name})),
-   ...data.documents.filter(d=>d.status==='trashed').map(d=>({kind:'document',id:d.id,name:d.filename,date:d.trashed_at,context:[data.cabinets.find(c=>c.id===d.cabinet_id)?.name,'Rév. '+d.revision].filter(Boolean).join(' · ')}))
+   ...data.cabinets.filter(c=>c.trashed_at).map(c=>({kind:'cabinet',id:c.id,name:c.name,date:c.trashed_at,context:data.affairs.find(a=>a.id===c.affair_id)?.name,parentDates:[data.affairs.find(a=>a.id===c.affair_id)?.trashed_at]})),
+   ...data.documents.filter(d=>d.status==='trashed').map(d=>({kind:'document',id:d.id,name:d.filename,date:d.trashed_at,context:[data.cabinets.find(c=>c.id===d.cabinet_id)?.name,'Rév. '+d.revision].filter(Boolean).join(' · '),
+      parentDates:[data.cabinets.find(c=>c.id===d.cabinet_id)?.trashed_at,data.affairs.find(a=>a.id===data.cabinets.find(c=>c.id===d.cabinet_id)?.affair_id)?.trashed_at]}))
  ];
  data.affairs=data.affairs.filter(a=>!a.trashed_at);
  const affairs=new Set(data.affairs.map(a=>a.id));
@@ -244,10 +245,11 @@ async function drawNotes(d,m){try{const r=await sb.from('annotations').select('*
 function openAnnotation(d,parent){if(!hasPermission('annotate'))return;const m=modal(`<h2>Nouvelle annotation — ${esc(d.filename)}</h2><form id="annoForm"><label>Page</label><input type="number" min="1" value="1" id="annoPage" required><label>Commentaire</label><textarea id="annoText" required placeholder="Repère, erreur constatée, correction…"></textarea><label>Visibilité</label><select id="annoVisibility"><option value="personal">Personnelle</option><option value="shared">Partagée (alerte au référent)</option></select><button>Enregistrer l’annotation</button></form>`);$('#annoForm',m).onsubmit=async e=>{e.preventDefault();try{await add('annotations',{document_id:d.id,author_id:currentUser.id,page:+$('#annoPage',m).value,content:$('#annoText',m).value.trim(),visibility:$('#annoVisibility',m).value});m.remove();drawNotes(d,parent);alertBox('Annotation enregistrée')}catch(e){error(e)}}}
 function openReport(d,parent,annotation=null){if(!hasPermission('send'))return;const affair=affairById(cabinetById(d.cabinet_id)?.affair_id),m=modal(`<h2>Signaler un problème</h2><form id="reportForm"><label>Titre</label><input id="reportTitle" required value="${esc(isDrawing(annotation)?'Corrections du schéma':annotation?'Annotation à traiter':'')}"><label>Description</label><textarea id="reportBody">${esc(isDrawing(annotation)?'':annotation?.content||'')}</textarea><label>Priorité</label><select id="priority"><option value="normal">Normale</option><option value="important">Importante</option><option value="urgent">Urgente</option></select><p class="muted small">Destinataire automatique : référent de l'affaire ${esc(affair?.name)}</p><button>Envoyer au référent</button></form>`);$('#reportForm',m).onsubmit=async e=>{e.preventDefault();try{await add('reports',{cabinet_id:d.cabinet_id,document_id:d.id,annotation_id:annotation?.id||null,author_id:currentUser.id,referent_id:affair?.referent_id||null,title:$('#reportTitle',m).value,body:$('#reportBody',m).value,priority:$('#priority',m).value});m.remove();await refresh();alertBox('Signalement créé dans le logiciel. E-mail et push à configurer séparément.')}catch(e){error(e)}}}
 async function publishDocument(id){const d=data.documents.find(x=>x.id===id);if(!d||!isManager())return;if(!confirm(`Publier officiellement « ${d.filename} » ?`))return;try{const src=await sb.storage.from('plans-drafts').download(d.storage_path);if(src.error)throw src.error;const target=`${d.cabinet_id}/${d.id}.pdf`;const up=await sb.storage.from('plans-public').upload(target,src.data,{contentType:'application/pdf',upsert:false});if(up.error)throw up.error;const r=await sb.rpc('publish_document',{p_id:d.id,p_public_path:target});if(r.error)throw r.error;await refresh();selectedCabinet=d.cabinet_id;renderCabinet();alertBox('Révision publiée. Accessible depuis le QR code.')}catch(e){error(e)}}
+const recycleDay=24*60*60*1000;
 const trashLabels={account:'Compte',affair:'Affaire',cabinet:'Armoire',document:'Schéma'};
 async function changeTrash(kind,id,name,trash,onDone){
  const warning={account:' Le compte perdra son accès.',affair:' Ses armoires et leurs schémas seront aussi masqués.',cabinet:' Ses schémas seront aussi masqués.',document:''};
- if(trash&&!confirm(`Mettre « ${name} » dans la corbeille ?${warning[kind]}`))return;
+ if(trash&&!confirm(`Mettre « ${name} » dans la corbeille pendant 30 jours ?${warning[kind]}`))return;
  try{
   const result=await sb.rpc('set_trashed',{p_kind:kind,p_id:id,p_trash:trash});
   if(result.error)throw result.error;
@@ -255,17 +257,30 @@ async function changeTrash(kind,id,name,trash,onDone){
   alertBox(trash?'Déplacé dans la corbeille.':'Élément restauré.');
  }catch(err){error(err)}
 }
+function recycleDeadline(item){
+ const dates=[item.date,...(item.parentDates||[])].filter(Boolean).map(date=>Date.parse(date)).filter(Number.isFinite);
+ return dates.length?Math.min(...dates)+30*recycleDay:null;
+}
 function renderRecycleBin(){
  const view=$('#view');
  if(!isManager()){view.textContent='Accès réservé à l’administration et au chef d’atelier.';return}
+ const now=Date.now();
  const entries=recycleBin.filter(item=>item.kind!=='account'||canManageAccounts())
-   .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
- view.innerHTML=`<section class="card"><h2>Corbeille</h2>${entries.map((item,i)=>`<div class="item">
- <b>${esc(item.name)}</b><p>${trashLabels[item.kind]}${item.context?' · '+esc(item.context):''} · ${fmt(item.date)}</p>
- <button class="secondary" data-restore="${i}">Restaurer</button></div>`).join('')||'<p class="muted">La corbeille est vide.</p>'}</section>`;
+   .map(item=>({...item,deadline:recycleDeadline(item)}))
+   .sort((a,b)=>(a.deadline??Infinity)-(b.deadline??Infinity));
+ view.innerHTML=`<section class="card"><h2>Corbeille</h2><p class="muted">Suppression définitive après 30 jours.</p>${entries.map((item,i)=>{
+  const remaining=item.deadline===null?null:item.deadline-now;
+  const days=remaining>0?Math.ceil(remaining/recycleDay):0;
+  const count=remaining===null?'Date de mise à la corbeille inconnue':remaining<=0?'Suppression en cours':
+    remaining<recycleDay?`Moins de ${Math.floor(remaining/(recycleDay/24))+1} h restantes`:`${days} jours restants`;
+  return `<div class="item"><b>${esc(item.name)}</b>
+  <p>${trashLabels[item.kind]}${item.context?' · '+esc(item.context):''} · ${fmt(item.date)}</p>
+  <p><strong>${count}</strong>${remaining>0?` · Jusqu’au ${fmt(item.deadline)}`:''}</p>
+  <button class="secondary" data-restore="${i}" ${remaining!==null&&remaining<=0?'disabled':''}>Restaurer</button></div>`
+ }).join('')||'<p class="muted">La corbeille est vide.</p>'}</section>`;
  $$('[data-restore]',view).forEach(b=>b.onclick=async()=>{
   const item=entries[Number(b.dataset.restore)];b.disabled=true;
-  try{await changeTrash(item.kind,item.id,item.name,false)}finally{b.disabled=false}
+  try{await changeTrash(item.kind,item.id,item.name,false)}finally{if(b.isConnected)b.disabled=false}
  })
 }
 function renderReports(){const v=$('#view');v.innerHTML=`<section class="card"><h2>Corrections de schémas</h2><div id="correctionRequests"></div></section><section class="card"><h2>Signalements</h2><div id="reportsList"></div></section>`;renderCorrectionRequests(v);$('#reportsList').innerHTML=data.reports.map(r=>{const note=data.annotations.find(n=>n.id===r.annotation_id);const drawing=isDrawing(note)||isDrawing({content:r.body});return `<div class="item"><div class="row between"><b>${esc(r.title)}</b><span class="pill">${esc(r.status)} · ${esc(r.priority)}</span></div><p>${isDrawing({content:r.body})?'Corrections graphiques du schéma':esc(r.body)}</p>${drawing&&data.documents.some(d=>d.id===r.document_id)?`<button class="secondary" data-report-corrections="${esc(r.document_id)}" data-correction-page="${esc(note?.page||1)}">Voir les corrections</button>`:''}<p class="small muted">${esc(cabinetName(r.cabinet_id))} · ${fmt(r.created_at)}</p>${canReviewReport(r)?`<select data-report-status="${r.id}"><option value="">Changer le statut…</option><option value="progress">En cours</option><option value="accepted">Accepté</option><option value="rejected">Refusé</option><option value="closed">Clôturé</option></select>`:''}</div>`}).join('')||'<div class="empty">Aucun signalement.</div>';$$('[data-report-corrections]',v).forEach(b=>b.onclick=()=>openCorrections(b.dataset.reportCorrections,b.dataset.correctionPage));$$('[data-report-status]').forEach(el=>el.onchange=async()=>{if(!el.value)return;try{await update('reports',{status:el.value},el.dataset.reportStatus);await refresh()}catch(e){error(e)}})}
