@@ -109,3 +109,10 @@ body .ew-symbol-detail-open .ew-symbol-form button[type=submit]{width:100%;min-h
 .ew-symbol-detail-open:not([hidden]) ~ .ew-editor-dock .ew-editor-options,
 .ew-symbol-detail-open:not([hidden]) ~ .ew-editor-dock .ew-symbol-actions{display:none}
 }
+
+.ew-editor-compare[hidden]{display:none}
+.ew-editor-compare{display:flex;justify-content:center;align-items:center;gap:6px;padding:5px 8px;background:#fff;border-bottom:1px solid var(--ew-border);flex:none}
+body .ew-editor-compare button{font-size:13px;min-height:36px;padding:6px 12px!important;margin:0}
+body .ew-editor-compare button[aria-pressed="true"]{background:#424850!important;color:#fff!important;border-color:#424850!important}
+.ew-ink-layer.ew-ink-original{opacity:0}
+.ew-review-comment{white-space:pre-wrap;overflow-wrap:anywhere}

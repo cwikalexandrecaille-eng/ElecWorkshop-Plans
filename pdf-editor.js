@@ -42,7 +42,21 @@ options.append(label('Couleur ',color),label('Épaisseur ',stroke),fontLabel,lab
 const actions=E('div',undefined,'ew-symbol-actions'),editTextBtn=E('button','Modifier texte','secondary'),groupBtn=E('button','Grouper','secondary'),splitBtn=E('button','Dissocier','secondary'),rotateBtn=E('button','↻ 90°','secondary'),growBtn=E('button','+ Taille','secondary'),shrinkBtn=E('button','− Taille','secondary'),deleteBtn=E('button','Supprimer','secondary');
 actions.append(editTextBtn,groupBtn,splitBtn,rotateBtn,shrinkBtn,growBtn,deleteBtn);actions.hidden=true;dock.append(actions);
 navigator.append(prev,pageLabel,next);controls.append(minus,zoomLabel,plus,fit);top.append(heading,navigator,controls,close);stage.append(pdfCanvas,ink);viewport.append(stage);
-panel.append(top,viewport);if(!readOnly)panel.append(library,dock);panel.append(info);dock.append(tools,options);backdrop.append(panel);document.body.append(backdrop);document.body.classList.add('ew-editing');
+panel.append(top);
+const compare=E('div',undefined,'ew-editor-compare');compare.hidden=true;
+if(readOnly){
+ const originalBtn=E('button','Original','secondary'),correctedBtn=E('button','Avec corrections','secondary');
+ compare.setAttribute('role','group');compare.setAttribute('aria-label','Affichage du schéma');
+ for(const button of [originalBtn,correctedBtn])button.type='button';
+ const display=showCorrections=>{
+  originalBtn.setAttribute('aria-pressed',String(!showCorrections));
+  correctedBtn.setAttribute('aria-pressed',String(showCorrections));
+  ink.classList.toggle('ew-ink-original',!showCorrections);
+ };
+ originalBtn.onclick=()=>display(false);correctedBtn.onclick=()=>display(true);
+ compare.append(originalBtn,correctedBtn);panel.append(compare);display(true);
+}
+panel.append(viewport);if(!readOnly)panel.append(library,dock);panel.append(info);dock.append(tools,options);backdrop.append(panel);document.body.append(backdrop);document.body.classList.add('ew-editing');
 let pdf,page=1,mode='navigate',items=[],rows=[],own=null,draft=null,dirty=false,busy=false,baseW=1,baseH=1,zoom=1,tx=0,ty=0,pan=null,gesture=null,lastTap=0,inkScale=1,pdfPage=null,renderTask=null,qualityTimer=null,renderSerial=0,selectedId=null,drag=null,symbolCatalog=[...BUILTIN_SYMBOLS];
 const pointers=new Map();
 const setStatus=(s,error=false)=>{info.textContent=s;info.style.color=error?'#a52b2b':''};
@@ -173,7 +187,7 @@ const changePage=async n=>{if(dirty&&!confirm('Modifications non enregistrées. 
 visibility.onchange=()=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?')){visibility.value=visibility.value==='shared'?'personal':'shared';return}load()};
 function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing');onClose?.()}
 close.onclick=end;
-try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;if(annotationRows){rows=annotationRows}else{const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[]}page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){await renderPage();selectMode('navigate');return}const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
+try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;if(annotationRows){rows=annotationRows}else{const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[]}page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){compare.hidden=!rows.some(r=>decode(r.content)?.length);await renderPage();selectMode('navigate');return}const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
 else{const fromDb=catalog.data||[];symbolCatalog=[...fromDb.filter(x=>Array.isArray(x.paths)&&x.paths.length),...BUILTIN_SYMBOLS.filter(x=>!fromDb.some(y=>y.slug===x.slug))];}
 renderCatalog();await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }

@@ -300,8 +300,12 @@ function openCorrectionRequest(id,showScheme=false){
  const m=modal(`<h2>${esc(d.filename)} · Rév. ${esc(d.revision)}</h2>
  <p>${esc(cabinetName(d.cabinet_id))} · ${fmt(request.submitted_at)}</p>
  <p>${author?'Envoyé par '+esc(author):''}</p><p class="pill">${esc(correctionStatuses[request.status])}</p>
+ ${!isReferent&&request.review_comment?`<p class="ew-review-comment"><strong>Retour du référent</strong><br>${esc(request.review_comment)}</p>`:''}
  <h3>Pages corrigées</h3><div class="toolbar">${pages.map(page=>`<button type="button" class="secondary" data-review-page="${esc(page)}">Page ${esc(page)}</button>`).join('')}</div>
- ${isReferent?`<form id="correctionStatus"><label for="correctionStatusValue">Statut</label><select id="correctionStatusValue">${Object.entries(correctionStatuses).map(([value,label])=>`<option value="${value}" ${value===request.status?'selected':''}>${label}</option>`).join('')}</select><button>Enregistrer le statut</button><div id="correctionError" class="error" hidden></div></form>`:''}`);
+ ${isReferent?`<form id="correctionStatus"><label for="correctionStatusValue">Statut</label><select id="correctionStatusValue">${Object.entries(correctionStatuses).map(([value,label])=>`<option value="${value}" ${value===request.status?'selected':''}>${label}</option>`).join('')}</select>
+ <label for="correctionReviewComment">Commentaire pour le câbleur (facultatif)</label>
+ <textarea id="correctionReviewComment" rows="3" maxlength="500" placeholder="Ex. Intégré dans la rév. C">${esc(request.review_comment||'')}</textarea>
+ <button>Enregistrer le retour</button><div id="correctionError" class="error" hidden></div></form>`:''}`);
  const viewPage=page=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,initialPage:page,readOnly:true,annotationRows:request.pages,correctionAuthor:author});
  $$('[data-review-page]',m).forEach(b=>b.onclick=()=>viewPage(b.dataset.reviewPage));
  if(showScheme&&pages.length)viewPage(pages[0]);
@@ -311,9 +315,9 @@ function openCorrectionRequest(id,showScheme=false){
   const form=e.currentTarget,button=form.querySelector('button'),message=$('#correctionError',form);
   button.disabled=true;message.hidden=true;
   try{
-   const result=await sb.rpc('set_correction_status',{p_id:id,p_status:$('#correctionStatusValue',form).value,p_submitted_at:request.submitted_at});
+   const result=await sb.rpc('set_correction_status',{p_id:id,p_status:$('#correctionStatusValue',form).value,p_submitted_at:request.submitted_at,p_comment:$('#correctionReviewComment',form).value.trim()});
    if(result.error)throw result.error;
-   await refresh();m.remove();alertBox('Statut enregistré.');
+   await refresh();m.remove();alertBox('Retour enregistré.');
   }catch(err){message.textContent=err.message;message.hidden=false}finally{button.disabled=false}
  }
 }
@@ -344,16 +348,17 @@ function renderNotifications(){
  const v=$('#view');
  const notes=data.notifications.filter(n=>n.recipient_id===currentUser.id).sort((a,b)=>b.created_at.localeCompare(a.created_at));
  v.innerHTML=`<section class="card"><h2>Notifications</h2>${notes.length?notes.map(n=>{
-  const id=n.kind==='correction_schema'&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
+  const isFeedback=n.kind==='correction_feedback';
+  const id=(n.kind==='correction_schema'||isFeedback)&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
   const author=id&&correctionAuthor(data.correction_requests.find(r=>r.id===id));
-  const previousAuthor=author&&!String(n.body).includes(' · Envoyé par ')?' · Envoyé par '+author:'';
-  return `<div class="item"><b>${id?'Schéma modifié':esc(n.kind)}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}">Ouvrir le schéma modifié</button></div>`:''}</div>`
+  const previousAuthor=!isFeedback&&author&&!String(n.body).includes(' · Envoyé par ')?' · Envoyé par '+author:'';
+  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):esc(n.kind)}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button></div>`:''}</div>`
  }).join(''):'<div class="empty">Aucune notification pour le moment.</div>'}</section>`;
  $$('[data-notice]',v).forEach(b=>b.onclick=async()=>{
   b.disabled=true;
   try{
    data.correction_requests=await q('correction_requests');
-   openCorrectionRequest(b.dataset.noticeRequest,true);
+   openCorrectionRequest(b.dataset.noticeRequest,b.dataset.showScheme==='yes');
    if(notes.some(n=>n.id===b.dataset.notice&&!n.is_read))await update('notifications',{is_read:true},b.dataset.notice);
    await refreshNotificationList();
   }catch(err){error(err)}finally{b.disabled=false}
