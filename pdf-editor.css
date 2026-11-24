@@ -90,3 +90,19 @@ body .ew-symbol-grid .ew-symbol-choice{min-height:124px!important;padding:6px!im
 .ew-font-control output{display:inline-block;min-width:39px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:#303944}
 .ew-symbol-form input[type=number]{width:100%;min-width:0;background:white!important}
 @media(max-width:580px){.ew-editor-options .ew-font-control{flex:1;justify-content:center;min-width:157px}.ew-font-control input[type=range]{width:90px!important}.ew-editor-options{justify-content:space-evenly}}
+
+/* Sur téléphone, le choix d'un symbole remplace la galerie par son formulaire. */
+.ew-symbol-detail-open{min-height:0!important;max-height:min(66dvh,620px)!important;overflow-y:auto!important}
+.ew-symbol-detail-open>.ew-symbol-list,.ew-symbol-detail-open>input{display:none!important}
+.ew-symbol-detail-open .ew-symbol-form{display:block!important;border-top:none!important;padding-top:2px!important}
+.ew-symbol-back{width:auto!important;margin:0 0 12px!important;padding:8px 11px!important;border-radius:9px!important;font-size:12px!important}
+.ew-symbol-selected{display:flex;align-items:center;gap:13px;padding:10px;border:1px solid #e4e9ed;background:#f7f9fa;border-radius:13px;margin:0 0 12px}
+.ew-symbol-selected canvas{width:90px;height:90px;flex:none;border-radius:8px;background:#fff}
+.ew-symbol-selected div{display:flex;flex-direction:column;gap:7px;min-width:0}
+.ew-symbol-selected strong{font-size:15px;line-height:1.3;color:#2e3943}
+.ew-symbol-selected small{font-size:11px;line-height:1.4;color:#818b95}
+.ew-symbol-detail-open .ew-symbol-form form{display:flex!important;flex-direction:column!important;gap:10px!important}
+.ew-symbol-detail-open .ew-symbol-form label{width:100%;font-size:12px!important;font-weight:600!important;gap:5px}
+.ew-symbol-detail-open .ew-symbol-form input{font-size:16px!important;height:44px!important;padding:8px 12px!important}
+body .ew-symbol-detail-open .ew-symbol-form button[type=submit]{width:100%!important;min-height:46px!important;font-size:14px!important;margin:6px 0 0!important}
+@media(max-width:580px){.ew-symbol-detail-open{max-height:min(58dvh,490px)!important}.ew-symbol-selected canvas{width:72px!important;height:72px!important}.ew-symbol-selected{gap:10px;padding:7px}.ew-symbol-selected strong{font-size:13px}.ew-symbol-detail-open .ew-symbol-form form{gap:8px!important}}
