@@ -104,4 +104,8 @@ body .ew-symbol-head .ew-symbol-back{width:auto;margin:0;font-size:12px}
 .ew-symbol-detail-open .ew-symbol-form label{font-size:12px;font-weight:600;gap:3px}
 .ew-symbol-detail-open .ew-symbol-form input{font-size:16px!important;height:44px;padding:7px 9px!important}
 body .ew-symbol-detail-open .ew-symbol-form button[type=submit]{width:100%;min-height:44px!important;font-size:14px!important;margin:2px 0 0!important}
-@media(max-width:580px){.ew-symbol-detail-open .ew-symbol-form form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:580px){
+.ew-symbol-detail-open .ew-symbol-form form{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ew-symbol-detail-open:not([hidden]) ~ .ew-editor-dock .ew-editor-options,
+.ew-symbol-detail-open:not([hidden]) ~ .ew-editor-dock .ew-symbol-actions{display:none}
+}
