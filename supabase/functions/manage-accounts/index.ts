@@ -55,7 +55,7 @@ Deno.serve(async (request) => {
     if (typeof input.id !== "string" || !/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(input.id) ||
         typeof input.active !== "boolean") return reply(400, { error: "Compte ou état invalide." });
     const saved = await admin.from("profiles").update({ ...profile, active: input.active })
-      .eq("id", input.id).in("role", roles).select("id").maybeSingle();
+      .eq("id", input.id).in("role", roles).is("trashed_at", null).select("id").maybeSingle();
     if (saved.error) return reply(500, { error: "Les modifications du compte n’ont pas été enregistrées." });
     if (!saved.data) return reply(404, { error: "Ce compte ne peut pas être modifié ici." });
     return reply(200, { id: saved.data.id });
