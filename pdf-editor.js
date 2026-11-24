@@ -25,7 +25,7 @@ if(o.k==='text')return x>=o.x-.016&&x<=o.x+Math.max(.045,String(o.text||'').leng
 return hit(o,x,y)}
 
 function hit(o,x,y){if(o.k==='white')return x>=Math.min(o.x,o.x2)-.025&&x<=Math.max(o.x,o.x2)+.025&&y>=Math.min(o.y,o.y2)-.025&&y<=Math.max(o.y,o.y2)+.025;if(o.k==='text')return Math.abs(o.x-x)<.22&&Math.abs(o.y-y)<.045;if(o.k==='line'){const dx=o.x2-o.x,dy=o.y2-o.y,t=clamp(((x-o.x)*dx+(y-o.y)*dy)/(dx*dx+dy*dy||1));return Math.hypot(x-o.x-t*dx,y-o.y-t*dy)<.025}return(o.pts||[]).some(p=>Math.hypot(x-p[0],y-p[1])<.025)}
-async function open({sb,document:doc,user,docUrl}){
+async function open({sb,document:doc,user,docUrl,initialPage=1,readOnly=false,onClose}){
 if(!window.pdfjsLib){alert('Lecteur PDF indisponible.');return}
 window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const backdrop=E('div',undefined,'ew-editor-backdrop'),panel=E('div',undefined,'ew-editor-panel'),top=E('header',undefined,'ew-editor-head'),heading=E('div',doc.filename+' · Rév. '+doc.revision,'ew-editor-title'),close=E('button','✕','secondary');
@@ -42,7 +42,7 @@ options.append(label('Couleur ',color),label('Épaisseur ',stroke),fontLabel,lab
 const actions=E('div',undefined,'ew-symbol-actions'),editTextBtn=E('button','Modifier texte','secondary'),groupBtn=E('button','Grouper','secondary'),splitBtn=E('button','Dissocier','secondary'),rotateBtn=E('button','↻ 90°','secondary'),growBtn=E('button','+ Taille','secondary'),shrinkBtn=E('button','− Taille','secondary'),deleteBtn=E('button','Supprimer','secondary');
 actions.append(editTextBtn,groupBtn,splitBtn,rotateBtn,shrinkBtn,growBtn,deleteBtn);actions.hidden=true;dock.append(actions);
 navigator.append(prev,pageLabel,next);controls.append(minus,zoomLabel,plus,fit);top.append(heading,navigator,controls,close);stage.append(pdfCanvas,ink);viewport.append(stage);
-panel.append(top,viewport,library,dock,info);dock.append(tools,options);backdrop.append(panel);document.body.append(backdrop);document.body.classList.add('ew-editing');
+panel.append(top,viewport);if(!readOnly)panel.append(library,dock);panel.append(info);dock.append(tools,options);backdrop.append(panel);document.body.append(backdrop);document.body.classList.add('ew-editing');
 let pdf,page=1,mode='navigate',items=[],rows=[],own=null,draft=null,dirty=false,busy=false,baseW=1,baseH=1,zoom=1,tx=0,ty=0,pan=null,gesture=null,lastTap=0,inkScale=1,pdfPage=null,renderTask=null,qualityTimer=null,renderSerial=0,selectedId=null,drag=null,symbolCatalog=[...BUILTIN_SYMBOLS];
 const pointers=new Map();
 const setStatus=(s,error=false)=>{info.textContent=s;info.style.color=error?'#a52b2b':''};
@@ -163,9 +163,9 @@ minus.onclick=()=>setZoom(zoom/1.4);plus.onclick=()=>setZoom(zoom*1.4);fit.oncli
 save.onclick=async()=>{if(!dirty){setStatus('Aucune modification à enregistrer.');return}save.disabled=true;try{const content=PREFIX+JSON.stringify(items);let r;if(own)r=await sb.from('annotations').update({content}).eq('id',own.id).eq('author_id',user.id).select().single();else r=await sb.from('annotations').insert({document_id:doc.id,author_id:user.id,page,visibility:visibility.value,content}).select().single();if(r.error)throw r.error;const q=await sb.from('annotations').select('*').eq('document_id',doc.id);if(q.error)throw q.error;rows=q.data||[];load();setStatus('Enregistré. Le PDF officiel reste inchangé.')}catch(e){setStatus('Enregistrement impossible : '+e.message,true)}finally{save.disabled=false}};
 const changePage=async n=>{if(dirty&&!confirm('Modifications non enregistrées. Changer de page ?'))return;if(page+n<1||page+n>pdf.numPages)return;page+=n;await renderPage();selectMode('navigate')};prev.onclick=()=>changePage(-1);next.onclick=()=>changePage(1);
 visibility.onchange=()=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?')){visibility.value=visibility.value==='shared'?'personal':'shared';return}load()};
-function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing')}
+function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing');onClose?.()}
 close.onclick=end;
-try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[];const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
+try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[];page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){await renderPage();selectMode('navigate');return}const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
 else{const fromDb=catalog.data||[];symbolCatalog=[...fromDb.filter(x=>Array.isArray(x.paths)&&x.paths.length),...BUILTIN_SYMBOLS.filter(x=>!fromDb.some(y=>y.slug===x.slug))];}
 renderCatalog();await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }
