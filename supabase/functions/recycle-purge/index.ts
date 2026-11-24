@@ -4,8 +4,12 @@ type Job = { id: string; kind: "file" | "account"; bucket: string | null; target
 
 Deno.serve(async (request) => {
   if (request.method !== "POST") return new Response(null, { status: 405 });
-  const token = request.headers.get("x-recycle-token");
-  if (!token || !/^[a-f0-9]{64}$/.test(token)) return new Response(null, { status: 401 });
+  const nonce = request.headers.get("x-recycle-nonce");
+  const timestamp = request.headers.get("x-recycle-timestamp");
+  const signature = request.headers.get("x-recycle-signature");
+  if (!nonce || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(nonce) ||
+      !timestamp || !/^[0-9]{10}$/.test(timestamp) ||
+      !signature || !/^[a-f0-9]{64}$/.test(signature)) return new Response(null, { status: 401 });
 
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -14,7 +18,9 @@ Deno.serve(async (request) => {
   const admin = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
-  const claim = await admin.rpc("recycle_purge_batch", { p_token: token });
+  const claim = await admin.rpc("recycle_purge_signed", {
+    p_nonce: nonce, p_timestamp: Number(timestamp), p_signature: signature,
+  });
   if (claim.error) {
     if (claim.error.code === "42501") return new Response(null, { status: 403 });
     console.error("Recycle batch failed", claim.error.code);
