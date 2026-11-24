@@ -64,7 +64,7 @@ growBtn.onclick=()=>scaleSelected(1.2);shrinkBtn.onclick=()=>scaleSelected(.83);
 deleteBtn.onclick=()=>{const ids=new Set(members().map(q=>q.id));items=items.filter(q=>!ids.has(q.id));selectedId=null;mutate('Sélection supprimée')};
 const libHead=E('div',undefined,'ew-symbol-head'),libTitle=E('strong','Bibliothèque de symboles'),libClose=E('button','✕','secondary'),libSearch=E('input'),libList=E('div',undefined,'ew-symbol-list'),libForm=E('div',undefined,'ew-symbol-form');
 const backToGallery=E('button','‹ Autres symboles','secondary');backToGallery.type='button';backToGallery.className='ew-symbol-back';backToGallery.onclick=()=>{libForm.replaceChildren();library.classList.remove('ew-symbol-detail-open');libSearch.hidden=false;libList.hidden=false;library.scrollTop=0};
-libSearch.type='search';libSearch.placeholder='Rechercher…';libHead.append(libTitle,libClose);library.append(libHead,libSearch,libList,libForm);libClose.onclick=()=>{library.hidden=true;libForm.replaceChildren()};
+libSearch.type='search';libSearch.placeholder='Rechercher…';libHead.append(libTitle,backToGallery,libClose);library.append(libHead,libSearch,libList,libForm);libClose.onclick=()=>{library.hidden=true;libForm.replaceChildren()};
 libSearch.oninput=()=>renderCatalog();
 function renderCatalog(){
 libList.replaceChildren();
@@ -89,10 +89,10 @@ function showSymbolForm(s){libForm.replaceChildren();library.classList.add('ew-s
 const selectedHeader=E('div',undefined,'ew-symbol-selected');
 const selectedPreview=E('canvas');const dpr=Math.min(3,Math.max(1,devicePixelRatio||1));selectedPreview.width=90*dpr;selectedPreview.height=90*dpr;selectedPreview.style.width='90px';selectedPreview.style.height='90px';
 const context=selectedPreview.getContext('2d');if(context){context.scale(dpr,dpr);renderSym(context,{x:.5,y:.5,w:.70,h:.70,paths:s.paths},90,90)}
-const selectedTitle=E('div');selectedTitle.append(E('strong',s.name),E('small','Renseignez les informations, puis insérez sur le PDF.'));selectedHeader.append(selectedPreview,selectedTitle);
-libForm.append(backToGallery,selectedHeader);
+selectedHeader.append(selectedPreview,E('strong',s.name));
+libForm.append(selectedHeader);
 const form=E('form'),fields={};
-for(const [key,caption] of [['repere','Repère (10Q1)'],['reference','Référence (A9P22602)'],['fonction','Caractéristiques (C2A)']]){const label=E('label',caption),input=E('input');input.type='text';input.maxLength=90;input.placeholder=caption;fields[key]=input;label.append(input);form.append(label)}
+for(const [key,caption,example] of [['repere','Repère','10Q1'],['reference','Référence','A9P22602'],['fonction','Caractéristiques','C2A']]){const label=E('label',caption),input=E('input');input.type='text';input.maxLength=90;input.placeholder=example;fields[key]=input;label.append(input);form.append(label)}
 const sizeLabel=E('label','Taille des textes (px)'),symbolTextSize=E('input');symbolTextSize.type='number';symbolTextSize.min='8';symbolTextSize.max='48';symbolTextSize.step='1';symbolTextSize.value=fontSize.value;sizeLabel.append(symbolTextSize);form.append(sizeLabel);
 const submit=E('button','Insérer sur le PDF');submit.type='submit';form.append(submit);libForm.append(form);library.scrollTop=0;
 form.onsubmit=e=>{e.preventDefault();const groupId=crypto.randomUUID(),x=.35,y=.35,w=.072,h=.095;
