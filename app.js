@@ -117,7 +117,13 @@ function showLogin(){sessionBar.innerHTML='';if(!sb){main('<section class="card 
  main(`<div class="ew-login"><section class="ew-login-card"><div class="ew-login-brand"><div class="ew-brand-symbol"><img src="./icon.svg" alt="" width="42" height="42"></div><strong>ElecWorkshop <span>Plans</span></strong></div><div class="ew-login-intro"><h1>Bienvenue</h1><p>Accès sécurisé aux schémas électriques</p></div><form id="loginForm" class="ew-login-form"><label for="ew-login-id">Identifiant</label><div class="ew-login-control">${ewIcon('user',21)}<input id="ew-login-id" type="text" name="username" required minlength="3" maxlength="40" pattern="[a-zA-Z0-9._-]+" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Votre identifiant"></div><label for="ew-login-pass">Mot de passe</label><div class="ew-login-control">${ewIcon('shield',21)}<input id="ew-login-pass" type="password" name="password" required autocomplete="current-password" placeholder="Votre mot de passe"><button type="button" id="ew-password-toggle" class="ew-eye" aria-label="Afficher le mot de passe">Voir</button></div><label for="ew-personal-device" class="ew-device-choice"><input id="ew-personal-device" type="checkbox" name="personalDevice" ${personalDevice?'checked':''}> Cet appareil est personnel</label><small class="ew-device-help">Cochez pour garder la connexion. En mode partagé, déconnexion après 15 minutes d’inactivité.</small><button type="submit" class="ew-login-submit">Se connecter ${ewIcon('arrow',18)}</button></form><div id="loginError" class="error" hidden></div><p class="ew-login-footer">Espace professionnel privé · ElecWorkshop Plans</p></section></div>`);
  $('#ew-password-toggle').onclick=()=>{const x=$('#ew-login-pass');x.type=x.type==='password'?'text':'password'};
  $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const r=await sb.auth.signInWithPassword({email:String(f.get('username')||'').trim().toLowerCase()+'@elecworkshop.invalid',password:f.get('password')});if(r.error)throw r.error;await storeDeviceMode(f.has('personalDevice'));await signedIn()}catch(ex){$('#loginError').hidden=false;$('#loginError').textContent=ex.message}}}
-async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user){showLogin();return}currentUser=s.data.user;
+function connectionError(err){return /fetch|network|timeout|délai/i.test(err?.message||'')||err?.name==='AuthRetryableFetchError'}
+async function authRequest(request){
+ let timer;
+ try{return await Promise.race([request,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Délai de connexion dépassé.')),8000)})])}
+ finally{clearTimeout(timer)}
+}
+async function signedIn(){let s=await authRequest(sb.auth.getUser());if(s.error&&connectionError(s.error))throw s.error;if(s.error||!s.data.user){window.EW_OFFLINE?.logout();showLogin();return}currentUser=s.data.user;
  const r=await sb.from('profiles').select('*').eq('id',currentUser.id).single();if(r.error||!r.data?.active){await signOutDevice();showLogin();alertBox('Compte sans profil actif : contactez l’administrateur.',true);return}profile=r.data;
  lastTouch=savedActivity();
  if(!personalDevice&&(!lastTouch||Date.now()-lastTouch>=idleLimit)){lastTouch=0;await checkInactivity();return}
@@ -528,9 +534,9 @@ function showExportFile(file){
   if(event.target===m||event.target.closest('[data-close]'))setTimeout(()=>URL.revokeObjectURL(url),3000);
  });
 }
-async function offlineStart(){
+async function offlineStart(expectedUser){
  const identity=await window.EW_OFFLINE.resume();
- if(!identity)return false;
+ if(!identity||(expectedUser&&identity.id!==expectedUser))return false;
  currentUser={id:identity.id};profile=identity.profile;sessionBar.innerHTML='';
  await window.EW_OFFLINE.render(app);return true;
 }
@@ -551,7 +557,15 @@ async function init(){if(!sb){main('<section class="card"><h1>Configuration requ
  const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}if(!navigator.onLine){
   if(!await offlineStart())showLogin();
  }else{
-  const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
+  let expectedUser;
+  try{
+   const s=await authRequest(sb.auth.getSession());
+   if(s.error)throw s.error;
+   expectedUser=s.data.session?.user?.id;
+   if(s.data.session)await signedIn();else showLogin();
+  }catch(err){
+   if(!connectionError(err)||!await offlineStart(expectedUser))throw err;
+  }
  }
  setInterval(checkInactivity,15000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkInactivity()});
