@@ -1,8 +1,92 @@
 /* ElecWorkshop Plans — installation et notifications push. */
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) =>
-  event.waitUntil(self.clients.claim()),
+const shellCache = "ew-shell-offline-20261125-1";
+const localAssets = [
+  "./",
+  "./index.html",
+  "./app.js",
+  "./offline.js",
+  "./push.js",
+  "./pdf-editor.js",
+  "./style.css",
+  "./pdf-editor.css",
+  "./redesign.css",
+  "./ui-v3.css",
+  "./config.js",
+  "./icon.svg",
+  "./icon-192.png",
+  "./manifest.webmanifest",
+];
+const externalAssets = [
+  "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js",
+  "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js",
+  "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
+];
+const localPaths = new Set(
+  localAssets.map((asset) => new URL(asset, self.registration.scope).pathname),
 );
+self.addEventListener("install", (event) =>
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(shellCache);
+      await cache.addAll([
+        ...localAssets.map(
+          (asset) => new URL(asset, self.registration.scope).href,
+        ),
+        ...externalAssets,
+      ]);
+      await self.skipWaiting();
+    })(),
+  ),
+);
+self.addEventListener("activate", (event) =>
+  event.waitUntil(
+    (async () => {
+      for (const name of await caches.keys())
+        if (name.startsWith("ew-shell-offline-") && name !== shellCache)
+          await caches.delete(name);
+      await self.clients.claim();
+    })(),
+  ),
+);
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  const navigation =
+    event.request.mode === "navigate" &&
+    url.href.startsWith(self.registration.scope);
+  const local =
+    url.origin === self.location.origin && localPaths.has(url.pathname);
+  if (!navigation && !local && !externalAssets.includes(url.href)) return;
+  event.respondWith(
+    (async () => {
+      const cache = await caches.open(shellCache);
+      try {
+        const response = await fetch(event.request, {
+          signal: AbortSignal.timeout(6000),
+        });
+        if (!response.ok) throw Error("Ressource indisponible");
+        const key = navigation
+          ? new URL("index.html", self.registration.scope).href
+          : local
+            ? url.origin + url.pathname
+            : url.href;
+        await cache.put(key, response.clone());
+        return response;
+      } catch (err) {
+        const key = navigation
+          ? new URL("index.html", self.registration.scope).href
+          : local
+            ? url.origin + url.pathname
+            : url.href;
+        const cached = await cache.match(key);
+        if (cached) return cached;
+        throw err;
+      }
+    })(),
+  );
+});
 function destination(value) {
   const root = new URL("./", self.registration.scope);
   if (

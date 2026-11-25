@@ -124,7 +124,7 @@ if(o.k==='text')return x>=o.x-.016&&x<=o.x+Math.max(.045,String(o.text||'').leng
 return hit(o,x,y)}
 
 function hit(o,x,y){if(o.k==='white')return x>=Math.min(o.x,o.x2)-.025&&x<=Math.max(o.x,o.x2)+.025&&y>=Math.min(o.y,o.y2)-.025&&y<=Math.max(o.y,o.y2)+.025;if(o.k==='text')return Math.abs(o.x-x)<.22&&Math.abs(o.y-y)<.045;if(o.k==='line'){const dx=o.x2-o.x,dy=o.y2-o.y,t=clamp(((x-o.x)*dx+(y-o.y)*dy)/(dx*dx+dy*dy||1));return Math.hypot(x-o.x-t*dx,y-o.y-t*dy)<.025}return(o.pts||[]).some(p=>Math.hypot(x-p[0],y-p[1])<.025)}
-async function open({sb,document:doc,user,docUrl,initialPage=1,readOnly=false,onClose,annotationRows,onSubmitCorrections,correctionAuthor='' }){
+async function open({sb,document:doc,user,docUrl,initialPage=1,readOnly=false,onClose,annotationRows,onSubmitCorrections,correctionAuthor='',pdfData,catalogRows,saveAnnotations,refreshAnnotations }){
 if(!window.pdfjsLib){alert('Lecteur PDF indisponible.');return}
 window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 const backdrop=E('div',undefined,'ew-editor-backdrop'),panel=E('div',undefined,'ew-editor-panel'),top=E('header',undefined,'ew-editor-head'),heading=E('div',doc.filename+' · Rév. '+doc.revision,'ew-editor-title'),close=E('button','✕','secondary');
@@ -224,8 +224,8 @@ items.push(...group);library.hidden=true;libForm.replaceChildren();selectMode('s
 
 selectMode('navigate');
 const pageRows=()=>rows.filter(r=>r.page===page&&decode(r.content));
-function paint(){const ctx=ink.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,ink.width,ink.height);ctx.setTransform(inkScale,0,0,inkScale,0,0);for(const r of pageRows())if(!own||r.id!==own.id)draw(ctx,decode(r.content),baseW,baseH);draw(ctx,items,baseW,baseH);if(mode==='select'&&selected()){const o=selected(),px=o.x*baseW,py=o.y*baseH;ctx.save();ctx.strokeStyle='#557992';ctx.setLineDash([5,4]);ctx.strokeRect(px-(o.k==='symbol'?(o.w||.07)*baseW/2:4)-5,py-(o.k==='symbol'?(o.h||.09)*baseH/2:16)-5,o.k==='symbol'?(o.w||.07)*baseW+10:Math.max(30,String(o.text||'').length*9),o.k==='symbol'?(o.h||.09)*baseH+10:25);ctx.restore()}if(draft)draw(ctx,[draft],baseW,baseH)}
-function load(){own=pageRows().find(r=>r.author_id===user.id&&r.visibility===visibility.value)||null;items=own?[...decode(own.content)]:[];dirty=false;selectedId=null;paint();refreshSelection()}
+function paint(){const ctx=ink.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,ink.width,ink.height);ctx.setTransform(inkScale,0,0,inkScale,0,0);for(const r of pageRows())if(!own||r.author_id!==user.id||r.visibility!==visibility.value)draw(ctx,decode(r.content),baseW,baseH);draw(ctx,items,baseW,baseH);if(mode==='select'&&selected()){const o=selected(),px=o.x*baseW,py=o.y*baseH;ctx.save();ctx.strokeStyle='#557992';ctx.setLineDash([5,4]);ctx.strokeRect(px-(o.k==='symbol'?(o.w||.07)*baseW/2:4)-5,py-(o.k==='symbol'?(o.h||.09)*baseH/2:16)-5,o.k==='symbol'?(o.w||.07)*baseW+10:Math.max(30,String(o.text||'').length*9),o.k==='symbol'?(o.h||.09)*baseH+10:25);ctx.restore()}if(draft)draw(ctx,[draft],baseW,baseH)}
+function load(){own=pageRows().find(r=>r.author_id===user.id&&r.visibility===visibility.value)||null;items=pageRows().filter(r=>r.author_id===user.id&&r.visibility===visibility.value).flatMap(r=>decode(r.content)||[]);dirty=false;selectedId=null;paint();refreshSelection()}
 function bound(){const vw=viewport.clientWidth,vh=viewport.clientHeight,ww=baseW*zoom,hh=baseH*zoom;if(ww<=vw)tx=(vw-ww)/2;else tx=clamp(tx,vw-ww-35,35);if(hh<=vh)ty=(vh-hh)/2;else ty=clamp(ty,vh-hh-35,35)}
 function transform(){bound();stage.style.transform='translate3d('+tx+'px,'+ty+'px,0) scale('+zoom+')';zoomLabel.textContent=Math.round(zoom*100)+' %'}
 function setZoom(z,clientX,clientY){const rect=viewport.getBoundingClientRect(),x=(clientX??(rect.left+rect.width/2))-rect.left,y=(clientY??(rect.top+rect.height/2))-rect.top;const nz=clamp(z,1,6),factor=nz/zoom;tx=x-(x-tx)*factor;ty=y-(y-ty)*factor;zoom=nz;transform();schedulePdfQuality()}
@@ -281,12 +281,46 @@ ink.addEventListener('pointerup',finish);ink.addEventListener('pointercancel',fi
 ink.addEventListener('dblclick',e=>{if(mode==='navigate')setZoom(zoom<2?zoom*2:1,e.clientX,e.clientY);else if(mode==='select'){const o=selected();if(o?.k==='text'){const t=prompt('Modifier '+(o.field||'le texte')+' :',o.text||'');if(t!==null){o.text=t.slice(0,250);mutate('Texte modifié')}}}});
 viewport.addEventListener('wheel',e=>{if(!e.ctrlKey&&Math.abs(e.deltaY)<5)return;e.preventDefault();setZoom(zoom*(e.deltaY<0?1.12:1/1.12),e.clientX,e.clientY)},{passive:false});
 minus.onclick=()=>setZoom(zoom/1.4);plus.onclick=()=>setZoom(zoom*1.4);fit.onclick=()=>{zoom=1;tx=ty=0;transform();schedulePdfQuality()};window.addEventListener('resize',transform,{signal:(()=>{const ctl=new AbortController();backdrop._resizeCtl=ctl;return ctl.signal})()});
-save.onclick=async()=>{if(!dirty){setStatus('Aucune modification à enregistrer.');return}save.disabled=true;try{const content=PREFIX+JSON.stringify(items);let r;if(own)r=await sb.from('annotations').update({content}).eq('id',own.id).eq('author_id',user.id).select().single();else r=await sb.from('annotations').insert({document_id:doc.id,author_id:user.id,page,visibility:visibility.value,content}).select().single();if(r.error)throw r.error;const q=await sb.from('annotations').select('*').eq('document_id',doc.id);if(q.error)throw q.error;rows=q.data||[];load();setStatus('Enregistré. Le PDF officiel reste inchangé.')}catch(e){setStatus('Enregistrement impossible : '+e.message,true)}finally{save.disabled=false}};
-const changePage=async n=>{if(dirty&&!confirm('Modifications non enregistrées. Changer de page ?'))return;if(page+n<1||page+n>pdf.numPages)return;page+=n;await renderPage();selectMode('navigate')};prev.onclick=()=>changePage(-1);next.onclick=()=>changePage(1);
+let saving=false;
+save.onclick=async()=>{
+ if(!dirty){setStatus('Aucune modification à enregistrer.');return}
+ if(saving)return;
+ saving=true;busy=true;
+ const controls=[...dock.querySelectorAll('button,input,select')].map(element=>({element,disabled:element.disabled}));
+ controls.forEach(({element})=>{element.disabled=true});
+ try{
+  const content=PREFIX+JSON.stringify(items);
+  if(saveAnnotations){
+   const saved=await saveAnnotations(page,visibility.value,content,rows);
+   rows=saved.rows;load();setStatus(saved.message);
+  }else{
+   let result;
+   if(own)result=await sb.from('annotations').update({content}).eq('id',own.id).eq('author_id',user.id).select().single();
+   else result=await sb.from('annotations').insert({document_id:doc.id,author_id:user.id,page,visibility:visibility.value,content}).select().single();
+   if(result.error)throw result.error;
+   const refreshed=await sb.from('annotations').select('*').eq('document_id',doc.id);
+   if(refreshed.error)throw refreshed.error;rows=refreshed.data||[];load();setStatus('Corrections enregistrées.');
+  }
+ }catch(err){setStatus('Enregistrement impossible : '+err.message,true)}
+ finally{
+  saving=false;busy=false;
+  controls.forEach(({element,disabled})=>{element.disabled=disabled});refreshSelection();
+ }
+};
+if(refreshAnnotations)window.addEventListener('ew-offline-change',async()=>{
+ if(dirty||saving||!backdrop.isConnected)return;
+ try{
+  const state=await refreshAnnotations();
+  if(dirty||saving||!backdrop.isConnected)return;
+  if(JSON.stringify(rows)!==JSON.stringify(state.rows)){rows=state.rows;load()}
+  setStatus(state.message);
+ }catch(err){setStatus(err.message,true)}
+},{signal:backdrop._resizeCtl.signal});
+const changePage=async n=>{if(saving)return;if(dirty&&!confirm('Modifications non enregistrées. Changer de page ?'))return;if(page+n<1||page+n>pdf.numPages)return;page+=n;await renderPage();selectMode('navigate')};prev.onclick=()=>changePage(-1);next.onclick=()=>changePage(1);
 visibility.onchange=()=>{if(dirty&&!confirm('Abandonner les modifications non enregistrées ?')){visibility.value=visibility.value==='shared'?'personal':'shared';return}load()};
-function end(){if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing');onClose?.()}
+function end(){if(saving)return;if(dirty&&!confirm('Fermer sans enregistrer ?'))return;clearTimeout(qualityTimer);if(renderTask){try{renderTask.cancel()}catch(_){}}backdrop._resizeCtl?.abort();backdrop.remove();document.body.classList.remove('ew-editing');onClose?.()}
 close.onclick=end;
-try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(await docUrl(doc)).promise;if(annotationRows){rows=annotationRows}else{const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[]}page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){compare.hidden=!rows.some(r=>decode(r.content)?.length);await renderPage();selectMode('navigate');return}const catalog=await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
+try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(pdfData?{data:pdfData}:await docUrl(doc)).promise;if(annotationRows){rows=annotationRows}else{const r=await sb.from('annotations').select('*').eq('document_id',doc.id);if(r.error)throw r.error;rows=r.data||[]}page=clamp(Math.trunc(Number(initialPage))||1,1,pdf.numPages);if(readOnly){compare.hidden=!rows.some(r=>decode(r.content)?.length);await renderPage();selectMode('navigate');return}const catalog=catalogRows?{data:catalogRows}:await sb.from('electrical_symbols').select('id,slug,name,category,paths,active').eq('active',true).order('category').order('name');if(catalog.error){symbolCatalog=[...BUILTIN_SYMBOLS];setStatus('Symboles intégrés disponibles (connexion bibliothèque momentanément indisponible).')}
 else{const fromDb=catalog.data||[];symbolCatalog=[...fromDb.filter(x=>Array.isArray(x.paths)&&x.paths.length),...BUILTIN_SYMBOLS.filter(x=>!fromDb.some(y=>y.slug===x.slug))];}
 renderCatalog();await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }

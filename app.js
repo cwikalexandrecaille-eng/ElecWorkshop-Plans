@@ -37,6 +37,7 @@ async function storeDeviceMode(value){
  personalDevice=value;recordActivity();
 }
 async function signOutDevice(){
+ window.EW_OFFLINE?.logout();
  await window.EW_PUSH?.disable().catch(err=>console.error(err));
  return sb.auth.signOut({scope:'local'});
 }
@@ -123,6 +124,8 @@ async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user
  if(personalDevice)recordActivity();
  if(!activityWasSet){['click','keydown','touchstart','pointermove','scroll'].forEach(ev=>window.addEventListener(ev,handleActivity,{passive:true}));activityWasSet=true}
  await loadAll();
+ await window.EW_OFFLINE?.remember(profile);
+ window.EW_OFFLINE?.syncAll().catch(err=>console.error(err));
  window.EW_PUSH?.sync().catch(err=>console.error(err));
  const correctionId=new URL(location.href).searchParams.get('correction');
  if(correctionId)tab='notifications';
@@ -156,7 +159,7 @@ function render(){if(!currentUser)return showLogin();sessionBar.innerHTML='';
  main(`<div class="ew-app"><aside class="ew-sidebar"><div class="ew-logo"><img src="./icon.svg" alt="" class="ew-app-logo" width="34" height="34"><span><strong>ElecWorkshop</strong><small>Plans</small></span></div><span class="ew-menu-caption">ESPACE DE TRAVAIL</span><nav class="ew-side-nav">${tabs.map(t=>`<button class="${tab===t[0]?'active':''}" data-tab="${t[0]}">${ewIcon(t[1],20)} <span>${t[2]}</span></button>`).join('')}</nav><div class="ew-side-user">${ewIcon('user',20)} <span>${esc(profile.full_name)}<small>${esc(profile.role)}</small></span></div></aside><div class="ew-app-main"><div class="ew-header"><div class="ew-header-brand"><img src="./icon.svg" alt="" class="ew-app-logo" width="34" height="34"><span><strong>ElecWorkshop</strong> Plans</span></div><div class="ew-header-actions"><button class="ew-icon-button" id="ew-notifs" aria-label="Notifications">${ewIcon('bell',23)}${notifCount?'<span class="ew-notif-dot"></span>':''}</button><button class="ew-icon-button" id="ew-account" aria-label="Compte">${ewIcon('user',23)}</button></div></div><main class="ew-content" id="view"></main></div><nav class="ew-bottom-nav" aria-label="Navigation principale">${nav.map(t=>`<button class="${tab===t[0]?'active':''}" data-tab="${t[0]}">${ewIcon(t[1],22)}<span>${t[2]}</span></button>`).join('')}</nav></div>`);
  $$('[data-tab]').forEach(el=>el.onclick=()=>{tab=el.dataset.tab;render()});
  $('#ew-notifs').onclick=async()=>{tab='notifications';render();await refreshNotificationList()};$('#ew-account').onclick=()=>{tab='account';render()};
- const pages={home:renderHome,folders:renderFolders,documents:renderDocuments,annotations:renderAnnotations,account:renderAccount,reports:renderReports,notifications:renderNotifications,backup:renderBackup,accounts:renderAccounts,trash:renderRecycleBin};
+ const pages={home:renderHome,folders:renderFolders,documents:renderDocuments,annotations:renderAnnotations,account:renderAccount,reports:renderReports,notifications:renderNotifications,backup:renderBackup,accounts:renderAccounts,trash:renderRecycleBin,offline:()=>window.EW_OFFLINE.render($('#view')).catch(error)};
  (pages[tab]||renderHome)();}
 function renderHome(){const v=$('#view');
  const last=data.cabinets.slice().reverse().slice(0,4);
@@ -248,7 +251,7 @@ function renderDocuments(){const v=$('#view');v.innerHTML=`<div class="ew-screen
 function isDrawing(annotation){return String(annotation?.content||'').startsWith('EW_DRAW_V1:')}
 function openCorrections(id,page){const d=data.documents.find(x=>x.id===id);if(d)window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,initialPage:page,readOnly:true})}
 function renderAnnotations(){const v=$('#view');const rows=data.annotations.slice().sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));v.innerHTML=`<div class="ew-screen-title"><div><small>NOTES ET CORRECTIONS</small><h1>Annotations</h1><p>Commentaires et modifications liés aux révisions des schémas.</p></div></div><div class="ew-list">${rows.map(n=>{const d=data.documents.find(x=>x.id===n.document_id);return `<button class="ew-recent" data-openpdf="${n.document_id}" data-correction-page="${isDrawing(n)?esc(n.page||1):''}"><span class="ew-recent-icon">${ewIcon('pen',23)}</span><span class="ew-recent-main"><small>${esc(cabinetName(d?.cabinet_id))} · Page ${esc(n.page||1)}</small><strong>${esc(d?.filename||'Document')}</strong><span>${isDrawing(n)?'Correction graphique':'Commentaire : '+esc(String(n.content||'').slice(0,80))}</span></span>${ewIcon('chevron',19)}</button>`}).join('')||'<p class="ew-empty">Aucune annotation pour le moment.</p>'}</div>`;$$('[data-openpdf]').forEach(b=>b.onclick=()=>b.dataset.correctionPage?openCorrections(b.dataset.openpdf,b.dataset.correctionPage):openDocument(b.dataset.openpdf))}
-function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><section class="card"><label class="ew-device-choice" for="accountPersonalDevice"><input id="accountPersonalDevice" type="checkbox" ${personalDevice?'checked':''}> Cet appareil est personnel</label><p class="ew-device-help">Garder la connexion sur cet appareil. En mode partagé, déconnexion après 15 minutes d’inactivité.</p></section><section class="card" id="pushSettings"></section><div class="ew-list ew-account-list">${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;window.EW_PUSH?.render($('#pushSettings')).catch(error);
+function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><section class="card"><label class="ew-device-choice" for="accountPersonalDevice"><input id="accountPersonalDevice" type="checkbox" ${personalDevice?'checked':''}> Cet appareil est personnel</label><p class="ew-device-help">Garder la connexion sur cet appareil. En mode partagé, déconnexion après 15 minutes d’inactivité.</p></section><section class="card" id="pushSettings"></section><div class="ew-list ew-account-list"><button data-go="offline">${ewIcon('file',21)} Hors connexion ${ewIcon('chevron',19)}</button>${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;window.EW_PUSH?.render($('#pushSettings')).catch(error);
  $('#accountPersonalDevice').onchange=async e=>{try{await storeDeviceMode(e.target.checked);renderAccount()}catch(err){e.target.checked=personalDevice;error(err)}};
  $$('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;render()});$('#logoutApp').onclick=async()=>{await signOutDevice();currentUser=null;profile=null;showLogin()}}
 
@@ -303,8 +306,15 @@ function openAccountForm(person){
 
 function openUpload(c){if(!hasPermission('upload'))return;const m=modal(`<h2>Importer un PDF — ${esc(c.name)}</h2><p class="warning">Le document sera un brouillon, invisible des clients jusqu'à publication.</p><form id="uploadForm"><label>Fichier PDF (max 50 Mo)</label><input type="file" accept="application/pdf,.pdf" id="file" required><label>Révision</label><input id="rev" value="A" required><button id="sendFile">Importer</button></form>`);$('#uploadForm',m).onsubmit=async e=>{e.preventDefault();const file=$('#file',m).files[0];if(!file||file.type!=='application/pdf'||file.size>52428800)return alert('Choisissez un fichier PDF de 50 Mo maximum.');try{$('#sendFile',m).disabled=true;const path=`${c.id}/${uuid()}.pdf`;const up=await sb.storage.from('plans-drafts').upload(path,file,{contentType:'application/pdf'});if(up.error)throw up.error;await add('documents',{cabinet_id:c.id,revision:$('#rev',m).value.trim(),filename:file.name,storage_path:path,uploader_id:currentUser.id,status:'draft'});m.remove();await refresh();selectedCabinet=c.id;renderCabinet();alertBox('PDF brouillon importé. Publication requise.')}catch(e){error(e);$('#sendFile',m).disabled=false}}}
 async function docUrl(d){if(d.status==='published'||d.status==='archived')return publicPdfUrl(d.storage_path);const r=await sb.storage.from('plans-drafts').createSignedUrl(d.storage_path,3600);if(r.error)throw r.error;return r.data.signedUrl}
-async function openDocument(id){const d=data.documents.find(x=>x.id===id);if(!d)return;try{const url=await docUrl(d),m=modal(`<h2>${esc(d.filename)} — Rév. ${esc(d.revision)}</h2><p class="muted">${esc(cabinetName(d.cabinet_id))} · ${esc(d.status)}</p><iframe class="preview" title="Document PDF" src="${esc(url)}"></iframe><div class="toolbar"><a class="btn secondary" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir / télécharger PDF</a><button id="editDrawing">${hasPermission('annotate')?'✎ Modifier le schéma':'Voir le schéma'}</button>${hasPermission('send')?'<button id="sendCorrections" class="secondary">Envoyer au référent</button>':''}${hasPermission('annotate')?'<button id="newAnnotation">+ Annotation</button>':''}${hasPermission('send')?'<button id="newReport">+ Signalement</button>':''}<button id="exportNotes" class="secondary">Exporter le PDF corrigé</button>${isManager()?'<button id="trashOpenDocument" class="secondary">Supprimer le schéma</button>':''}</div><div id="notesArea"></div>`);
- $('#editDrawing',m).onclick=()=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,readOnly:!hasPermission('annotate'),onClose:()=>drawNotes(d,m),onSubmitCorrections:hasPermission('send')?()=>submitCorrectionRequest(d):undefined});if($('#sendCorrections',m))$('#sendCorrections',m).onclick=async e=>{const button=e.currentTarget;button.disabled=true;try{alertBox(await submitCorrectionRequest(d))}catch(err){error(err)}finally{button.disabled=false}};if($('#newAnnotation',m))$('#newAnnotation',m).onclick=()=>openAnnotation(d,m);if($('#newReport',m))$('#newReport',m).onclick=()=>openReport(d,m);$('#exportNotes',m).onclick=e=>exportAnnotated(e.currentTarget,d);drawNotes(d,m);
+async function openDocument(id){const d=data.documents.find(x=>x.id===id);if(!d)return;try{const url=await docUrl(d),m=modal(`<h2>${esc(d.filename)} — Rév. ${esc(d.revision)}</h2><p class="muted">${esc(cabinetName(d.cabinet_id))} · ${esc(d.status)}</p><iframe class="preview" title="Document PDF" src="${esc(url)}"></iframe><div class="toolbar"><a class="btn secondary" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir / télécharger PDF</a><button id="editDrawing">${hasPermission('annotate')?'✎ Modifier le schéma':'Voir le schéma'}</button>${hasPermission('send')?'<button id="sendCorrections" class="secondary">Envoyer au référent</button>':''}${hasPermission('annotate')?'<button id="newAnnotation">+ Annotation</button>':''}${hasPermission('send')?'<button id="newReport">+ Signalement</button>':''}<button id="exportNotes" class="secondary">Exporter le PDF corrigé</button>${personalDevice?'<button type="button" class="secondary" id="downloadOffline">Disponible hors connexion</button>':''}${isManager()?'<button id="trashOpenDocument" class="secondary">Supprimer le schéma</button>':''}</div><div id="notesArea"></div>`);
+ $('#editDrawing',m).onclick=async e=>{
+  const button=e.currentTarget;button.disabled=true;
+  try{await window.EW_OFFLINE.onlineEditor(d,()=>{if(navigator.onLine)drawNotes(d,m)})}catch(err){error(err)}finally{button.disabled=false}
+ };if($('#sendCorrections',m))$('#sendCorrections',m).onclick=async e=>{const button=e.currentTarget;button.disabled=true;try{alertBox(await submitCorrectionRequest(d))}catch(err){error(err)}finally{button.disabled=false}};if($('#newAnnotation',m))$('#newAnnotation',m).onclick=()=>openAnnotation(d,m);if($('#newReport',m))$('#newReport',m).onclick=()=>openReport(d,m);$('#exportNotes',m).onclick=e=>exportAnnotated(e.currentTarget,d);drawNotes(d,m);
+ if($('#downloadOffline',m))$('#downloadOffline',m).onclick=async e=>{
+  const button=e.currentTarget;button.disabled=true;button.textContent='Téléchargement…';
+  try{await window.EW_OFFLINE.prepare(d);button.textContent='Disponible hors connexion ✓'}catch(err){button.textContent='Disponible hors connexion';error(err)}finally{button.disabled=false}
+ };
  if($('#trashOpenDocument',m))$('#trashOpenDocument',m).onclick=()=>changeTrash('document',d.id,d.filename,true,()=>m.remove());
  }catch(e){error(e)}}
 async function drawNotes(d,m){try{const r=await sb.from('annotations').select('*').eq('document_id',d.id).order('created_at',{ascending:false});if(r.error)throw r.error;const notes=r.data||[];$('#notesArea',m).innerHTML=`<h3>Annotations de cette révision (${notes.length})</h3>`+notes.map(n=>`<div class="note"><div class="row between"><b>Page ${n.page} · ${n.visibility==='shared'?'Partagée':n.visibility==='personal'?'Personnelle':esc(n.visibility)}</b><span class="pill">${n.status==='closed'?'Traitée':n.status==='open'?'À traiter':esc(n.status)}</span></div>${isDrawing(n)?`<button class="secondary" data-correction-page="${esc(n.page)}">Voir les corrections</button>`:`<p>${esc(n.content)}</p>`}<p class="small muted">${fmt(n.created_at)}</p>${isManager()&&n.status==='open'?`<button class="secondary" data-close-note="${n.id}">Marquer traitée</button>`:''}${hasPermission('send')&&(n.author_id===currentUser.id||hasPermission('review'))?`<button class="secondary" data-convert-note="${n.id}">Convertir en signalement</button>`:''}</div>`).join('');$$('[data-correction-page]',m).forEach(b=>b.onclick=()=>openCorrections(d.id,b.dataset.correctionPage));$$('[data-close-note]',m).forEach(b=>b.onclick=async()=>{try{await update('annotations',{status:'closed'},b.dataset.closeNote);drawNotes(d,m)}catch(e){error(e)}});$$('[data-convert-note]',m).forEach(b=>b.onclick=()=>{const n=notes.find(x=>x.id===b.dataset.convertNote);if(n&&(n.author_id===currentUser.id||hasPermission('review')))openReport(d,m,n);else alert('Conversion réservée à l’auteur ou au référent')})}catch(e){error(e)}}
@@ -518,14 +528,36 @@ function showExportFile(file){
   if(event.target===m||event.target.closest('[data-close]'))setTimeout(()=>URL.revokeObjectURL(url),3000);
  });
 }
+async function offlineStart(){
+ const identity=await window.EW_OFFLINE.resume();
+ if(!identity)return false;
+ currentUser={id:identity.id};profile=identity.profile;sessionBar.innerHTML='';
+ await window.EW_OFFLINE.render(app);return true;
+}
+function updateOfflineScreen(){
+ const view=$('#view')||app;
+ if(view.querySelector('[data-offline-list]'))window.EW_OFFLINE.render(view).catch(error);
+}
 async function init(){if(!sb){main('<section class="card"><h1>Configuration requise</h1><p>Renseignez <code>config.js</code> avec votre URL Supabase et la clé publishable (anon).</p><p>Voir le guide <b>DEPLOIEMENT_IPHONE.md</b>.</p></section>');return}
+ window.EW_OFFLINE.init({
+  client:sb,getUser:()=>currentUser,personal:()=>personalDevice,docUrl,canAnnotate:()=>hasPermission('annotate'),canSend:()=>hasPermission('send'),
+  report:error,submit:submitCorrectionRequest,
+  openOnline:async id=>{await loadAll();await openDocument(id)},
+  back:async()=>{tab='account';await signedIn()},
+  signOut:async()=>{await signOutDevice();currentUser=null;profile=null;showLogin()}
+ });
+ window.addEventListener('ew-offline-change',updateOfflineScreen);
  window.EW_PUSH?.init({client:sb,getUser:()=>currentUser,isPersonal:()=>personalDevice});
- const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
+ const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}if(!navigator.onLine){
+  if(!await offlineStart())showLogin();
+ }else{
+  const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
+ }
  setInterval(checkInactivity,15000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkInactivity()});
  window.addEventListener('pageshow',checkInactivity);
  setInterval(refreshNotificationList,30000);document.addEventListener('visibilitychange',refreshNotificationList);
- window.addEventListener('online',()=>{if(currentUser)alertBox('Connexion Internet retrouvée.')})
+ window.addEventListener('online',()=>{if(currentUser)alertBox('Connexion Internet retrouvée. Les corrections en attente seront vérifiées avant synchronisation.')})
 }
 init().catch(error);
 })();
