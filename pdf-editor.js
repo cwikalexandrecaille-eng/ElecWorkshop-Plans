@@ -19,6 +19,105 @@ if(t==='d'){ctx.save();ctx.setLineDash([Math.max(3,ww*.045),Math.max(3,ww*.034)]
 if(t==='e'){ctx.ellipse((a-.5)*ww,(b-.5)*hh,c*ww,d*hh,0,0,Math.PI*2);ctx.stroke()}
 
 }ctx.restore()}
+function canvasPng(canvas){
+ return new Promise((resolve,reject)=>canvas.toBlob(blob=>{
+  if(blob)resolve(blob);
+  else reject(Error('Impossible de créer une image des annotations.'));
+ },'image/png'));
+}
+
+async function appendComments(pdf,notes){
+ if(!notes.length)return;
+ const canvas=E('canvas'),width=595,height=842,scale=2;
+ canvas.width=width*scale;canvas.height=height*scale;
+ const ctx=canvas.getContext('2d');
+ ctx.scale(scale,scale);
+ const margin=42,lineHeight=17,bodyFont='12px sans-serif';
+ let y=0;
+ function startPage(){
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);
+  ctx.fillStyle='#30343a';ctx.font='bold 19px sans-serif';
+  ctx.fillText('Commentaires partagés',margin,margin);
+  ctx.font=bodyFont;y=margin+33;
+ }
+ async function finishPage(){
+  const image=await pdf.embedPng(await (await canvasPng(canvas)).arrayBuffer());
+  pdf.addPage([width,height]).drawImage(image,{x:0,y:0,width,height});
+ }
+ startPage();
+ try{
+  for(const note of notes){
+   const prefix='Page '+note.page;
+   const content=note.content.trim();
+   for(const paragraph of (prefix+' · '+content).split(/\r?\n/)){
+    let line='';
+    for(const char of paragraph){
+     if(line&&ctx.measureText(line+char).width>width-2*margin){
+      if(y>height-margin){await finishPage();startPage()}
+      ctx.fillText(line,margin,y);y+=lineHeight;line='';
+     }
+     line+=char;
+    }
+    if(y>height-margin){await finishPage();startPage()}
+    ctx.fillText(line,margin,y);y+=lineHeight;
+   }
+   y+=8;
+  }
+  await finishPage();
+ }finally{canvas.width=0;canvas.height=0}
+}
+
+async function exportCorrections(bytes,rows,referenceWidth){
+ const lib=window.PDFLib;
+ if(!lib||!window.pdfjsLib)throw Error('Les outils PDF sont indisponibles.');
+ const output=await lib.PDFDocument.load(bytes);
+ const pageCount=output.getPageCount(),drawings=new Map(),notes=[];
+ for(const row of rows){
+  const number=Number(row.page);
+  if(!Number.isInteger(number)||number<1||number>pageCount||typeof row.content!=='string')continue;
+  if(row.content.startsWith(PREFIX)){
+   const content=decode(row.content);
+   if(content?.length){
+    if(!drawings.has(number))drawings.set(number,[]);
+    drawings.get(number).push(content);
+   }
+  }else if(row.content.trim()){
+   notes.push({page:number,content:row.content});
+  }
+ }
+ if(!drawings.size&&!notes.length)throw Error('Aucune correction partagée à exporter.');
+ if(drawings.size){
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const task=window.pdfjsLib.getDocument({data:bytes.slice(0)});
+  try{
+   const input=await task.promise;
+   for(const [number,objects] of drawings){
+    const source=await input.getPage(number),viewport=source.getViewport({scale:1});
+    const w=referenceWidth,h=w*viewport.height/viewport.width;
+    const scale=Math.min(3,3600/Math.max(w,h),Math.sqrt(9000000/(w*h)));
+    const canvas=E('canvas');
+    canvas.width=Math.max(1,Math.round(w*scale));canvas.height=Math.max(1,Math.round(h*scale));
+    try{
+     const ctx=canvas.getContext('2d');
+     ctx.scale(canvas.width/w,canvas.height/h);
+     for(const group of objects)draw(ctx,group,w,h);
+     const image=await output.embedPng(await (await canvasPng(canvas)).arrayBuffer());
+     // Transform the displayed overlay into the original PDF's coordinates.
+     const [x,y]=viewport.convertToPdfPoint(0,viewport.height);
+     const [rightX,rightY]=viewport.convertToPdfPoint(viewport.width,viewport.height);
+     const [topX,topY]=viewport.convertToPdfPoint(0,0);
+     output.getPage(number-1).drawImage(image,{
+      x,y,width:Math.hypot(rightX-x,rightY-y),height:Math.hypot(topX-x,topY-y),
+      rotate:lib.radians(Math.atan2(rightY-y,rightX-x))
+     });
+    }finally{canvas.width=0;canvas.height=0}
+   }
+  }finally{await task.destroy()}
+ }
+ await appendComments(output,notes.sort((a,b)=>a.page-b.page));
+ return output.save();
+}
+
 function translateObject(o,dx,dy){o.x=clamp(o.x+dx);o.y=clamp(o.y+dy);if(o.x2!==undefined)o.x2=clamp(o.x2+dx);if(o.y2!==undefined)o.y2=clamp(o.y2+dy);if(o.pts)o.pts=o.pts.map(p=>[clamp(p[0]+dx),clamp(p[1]+dy)])}
 function hitSymbol(o,x,y){if(o.k==='symbol')return Math.abs(x-o.x)<(o.w||.07)/2+.02&&Math.abs(y-o.y)<(o.h||.09)/2+.02;
 if(o.k==='text')return x>=o.x-.016&&x<=o.x+Math.max(.045,String(o.text||'').length*(o.fontSize||.018)*.6)+.016&&Math.abs(y-o.y)<.03;
@@ -191,5 +290,5 @@ try{setStatus('Chargement du schéma…');pdf=await window.pdfjsLib.getDocument(
 else{const fromDb=catalog.data||[];symbolCatalog=[...fromDb.filter(x=>Array.isArray(x.paths)&&x.paths.length),...BUILTIN_SYMBOLS.filter(x=>!fromDb.some(y=>y.slug===x.slug))];}
 renderCatalog();await renderPage();selectMode('navigate')}catch(e){setStatus('Erreur de chargement : '+e.message,true)}
 }
-window.EW_PDF_EDITOR={open};
+window.EW_PDF_EDITOR={open,exportCorrections};
 })();

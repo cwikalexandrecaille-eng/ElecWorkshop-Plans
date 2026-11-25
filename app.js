@@ -237,8 +237,8 @@ function openAccountForm(person){
 
 function openUpload(c){if(!hasPermission('upload'))return;const m=modal(`<h2>Importer un PDF — ${esc(c.name)}</h2><p class="warning">Le document sera un brouillon, invisible des clients jusqu'à publication.</p><form id="uploadForm"><label>Fichier PDF (max 50 Mo)</label><input type="file" accept="application/pdf,.pdf" id="file" required><label>Révision</label><input id="rev" value="A" required><button id="sendFile">Importer</button></form>`);$('#uploadForm',m).onsubmit=async e=>{e.preventDefault();const file=$('#file',m).files[0];if(!file||file.type!=='application/pdf'||file.size>52428800)return alert('Choisissez un fichier PDF de 50 Mo maximum.');try{$('#sendFile',m).disabled=true;const path=`${c.id}/${uuid()}.pdf`;const up=await sb.storage.from('plans-drafts').upload(path,file,{contentType:'application/pdf'});if(up.error)throw up.error;await add('documents',{cabinet_id:c.id,revision:$('#rev',m).value.trim(),filename:file.name,storage_path:path,uploader_id:currentUser.id,status:'draft'});m.remove();await refresh();selectedCabinet=c.id;renderCabinet();alertBox('PDF brouillon importé. Publication requise.')}catch(e){error(e);$('#sendFile',m).disabled=false}}}
 async function docUrl(d){if(d.status==='published'||d.status==='archived')return publicPdfUrl(d.storage_path);const r=await sb.storage.from('plans-drafts').createSignedUrl(d.storage_path,3600);if(r.error)throw r.error;return r.data.signedUrl}
-async function openDocument(id){const d=data.documents.find(x=>x.id===id);if(!d)return;try{const url=await docUrl(d),m=modal(`<h2>${esc(d.filename)} — Rév. ${esc(d.revision)}</h2><p class="muted">${esc(cabinetName(d.cabinet_id))} · ${esc(d.status)}</p><iframe class="preview" title="Document PDF" src="${esc(url)}"></iframe><div class="toolbar"><a class="btn secondary" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir / télécharger PDF</a><button id="editDrawing">${hasPermission('annotate')?'✎ Modifier le schéma':'Voir le schéma'}</button>${hasPermission('send')?'<button id="sendCorrections" class="secondary">Envoyer au référent</button>':''}${hasPermission('annotate')?'<button id="newAnnotation">+ Annotation</button>':''}${hasPermission('send')?'<button id="newReport">+ Signalement</button>':''}<button id="exportNotes" class="secondary">Exporter avec commentaires</button>${isManager()?'<button id="trashOpenDocument" class="secondary">Supprimer le schéma</button>':''}</div><div id="notesArea"></div>`);
- $('#editDrawing',m).onclick=()=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,readOnly:!hasPermission('annotate'),onClose:()=>drawNotes(d,m),onSubmitCorrections:hasPermission('send')?()=>submitCorrectionRequest(d):undefined});if($('#sendCorrections',m))$('#sendCorrections',m).onclick=async e=>{const button=e.currentTarget;button.disabled=true;try{alertBox(await submitCorrectionRequest(d))}catch(err){error(err)}finally{button.disabled=false}};if($('#newAnnotation',m))$('#newAnnotation',m).onclick=()=>openAnnotation(d,m);if($('#newReport',m))$('#newReport',m).onclick=()=>openReport(d,m);$('#exportNotes',m).onclick=()=>exportAnnotated(d);drawNotes(d,m);
+async function openDocument(id){const d=data.documents.find(x=>x.id===id);if(!d)return;try{const url=await docUrl(d),m=modal(`<h2>${esc(d.filename)} — Rév. ${esc(d.revision)}</h2><p class="muted">${esc(cabinetName(d.cabinet_id))} · ${esc(d.status)}</p><iframe class="preview" title="Document PDF" src="${esc(url)}"></iframe><div class="toolbar"><a class="btn secondary" href="${esc(url)}" target="_blank" rel="noopener">Ouvrir / télécharger PDF</a><button id="editDrawing">${hasPermission('annotate')?'✎ Modifier le schéma':'Voir le schéma'}</button>${hasPermission('send')?'<button id="sendCorrections" class="secondary">Envoyer au référent</button>':''}${hasPermission('annotate')?'<button id="newAnnotation">+ Annotation</button>':''}${hasPermission('send')?'<button id="newReport">+ Signalement</button>':''}<button id="exportNotes" class="secondary">Exporter le PDF corrigé</button>${isManager()?'<button id="trashOpenDocument" class="secondary">Supprimer le schéma</button>':''}</div><div id="notesArea"></div>`);
+ $('#editDrawing',m).onclick=()=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,readOnly:!hasPermission('annotate'),onClose:()=>drawNotes(d,m),onSubmitCorrections:hasPermission('send')?()=>submitCorrectionRequest(d):undefined});if($('#sendCorrections',m))$('#sendCorrections',m).onclick=async e=>{const button=e.currentTarget;button.disabled=true;try{alertBox(await submitCorrectionRequest(d))}catch(err){error(err)}finally{button.disabled=false}};if($('#newAnnotation',m))$('#newAnnotation',m).onclick=()=>openAnnotation(d,m);if($('#newReport',m))$('#newReport',m).onclick=()=>openReport(d,m);$('#exportNotes',m).onclick=e=>exportAnnotated(e.currentTarget,d);drawNotes(d,m);
  if($('#trashOpenDocument',m))$('#trashOpenDocument',m).onclick=()=>changeTrash('document',d.id,d.filename,true,()=>m.remove());
  }catch(e){error(e)}}
 async function drawNotes(d,m){try{const r=await sb.from('annotations').select('*').eq('document_id',d.id).order('created_at',{ascending:false});if(r.error)throw r.error;const notes=r.data||[];$('#notesArea',m).innerHTML=`<h3>Annotations de cette révision (${notes.length})</h3>`+notes.map(n=>`<div class="note"><div class="row between"><b>Page ${n.page} · ${n.visibility==='shared'?'Partagée':n.visibility==='personal'?'Personnelle':esc(n.visibility)}</b><span class="pill">${n.status==='closed'?'Traitée':n.status==='open'?'À traiter':esc(n.status)}</span></div>${isDrawing(n)?`<button class="secondary" data-correction-page="${esc(n.page)}">Voir les corrections</button>`:`<p>${esc(n.content)}</p>`}<p class="small muted">${fmt(n.created_at)}</p>${isManager()&&n.status==='open'?`<button class="secondary" data-close-note="${n.id}">Marquer traitée</button>`:''}${hasPermission('send')&&(n.author_id===currentUser.id||hasPermission('review'))?`<button class="secondary" data-convert-note="${n.id}">Convertir en signalement</button>`:''}</div>`).join('');$$('[data-correction-page]',m).forEach(b=>b.onclick=()=>openCorrections(d.id,b.dataset.correctionPage));$$('[data-close-note]',m).forEach(b=>b.onclick=async()=>{try{await update('annotations',{status:'closed'},b.dataset.closeNote);drawNotes(d,m)}catch(e){error(e)}});$$('[data-convert-note]',m).forEach(b=>b.onclick=()=>{const n=notes.find(x=>x.id===b.dataset.convertNote);if(n&&(n.author_id===currentUser.id||hasPermission('review')))openReport(d,m,n);else alert('Conversion réservée à l’auteur ou au référent')})}catch(e){error(e)}}
@@ -301,11 +301,13 @@ function openCorrectionRequest(id,showScheme=false){
  <p>${esc(cabinetName(d.cabinet_id))} · ${fmt(request.submitted_at)}</p>
  <p>${author?'Envoyé par '+esc(author):''}</p><p class="pill">${esc(correctionStatuses[request.status])}</p>
  ${!isReferent&&request.review_comment?`<p class="ew-review-comment"><strong>Retour du référent</strong><br>${esc(request.review_comment)}</p>`:''}
+ <div class="toolbar"><button id="exportRequest" type="button" class="secondary">Exporter le PDF corrigé</button></div>
  <h3>Pages corrigées</h3><div class="toolbar">${pages.map(page=>`<button type="button" class="secondary" data-review-page="${esc(page)}">Page ${esc(page)}</button>`).join('')}</div>
  ${isReferent?`<form id="correctionStatus"><label for="correctionStatusValue">Statut</label><select id="correctionStatusValue">${Object.entries(correctionStatuses).map(([value,label])=>`<option value="${value}" ${value===request.status?'selected':''}>${label}</option>`).join('')}</select>
  <label for="correctionReviewComment">Commentaire pour le câbleur (facultatif)</label>
  <textarea id="correctionReviewComment" rows="3" maxlength="500" placeholder="Ex. Intégré dans la rév. C">${esc(request.review_comment||'')}</textarea>
  <button>Enregistrer le retour</button><div id="correctionError" class="error" hidden></div></form>`:''}`);
+ $('#exportRequest',m).onclick=e=>exportAnnotated(e.currentTarget,d,request.pages);
  const viewPage=page=>window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,initialPage:page,readOnly:true,annotationRows:request.pages,correctionAuthor:author});
  $$('[data-review-page]',m).forEach(b=>b.onclick=()=>viewPage(b.dataset.reviewPage));
  if(showScheme&&pages.length)viewPage(pages[0]);
@@ -394,7 +396,45 @@ function exportWmf(c){try{const qrdiv=document.createElement('div');qrdiv.style.
  dv.setUint16(22,1,true);dv.setUint16(24,9,true);dv.setUint16(26,0x300,true);dv.setUint32(28,(18+size)/2,true);dv.setUint16(32,3,true);dv.setUint32(34,Math.max(...records.map(x=>x.length/2)),true);dv.setUint16(38,0,true);let off=40;for(const r of records){buf.set(r,off);off+=r.length}
  downloads(c.name+'.wmf',new Blob([buf],{type:'application/octet-stream'}));alertBox('WMF généré : vérifier le rendu et le nom dans Murrplastik MP.')
  }catch(e){error(e)}}
-async function exportAnnotated(d){try{const url=await docUrl(d),res=await fetch(url),pdf=await window.PDFLib.PDFDocument.load(await res.arrayBuffer()),r=await sb.from('annotations').select('*').eq('document_id',d.id);if(r.error)throw r.error;const notes=r.data||[];for(const n of notes){const p=pdf.getPages()[n.page-1];if(!p)continue;const text=(n.visibility==='personal'?'[Note privée] ':'[Note partagée] ')+n.content;const safe=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7e]/g,'?');p.drawText(safe.slice(0,100),{x:28,y:Math.max(25,p.getHeight()-24),size:8,color:window.PDFLib.rgb(0.55,0.08,0.08)})}const out=await pdf.save();downloads('COPIE_ANNOTEE_'+d.filename,new Blob([out],{type:'application/pdf'}));alertBox('Copie annotée exportée — ne remplace pas le PDF officiel')}catch(e){error(e)}}
+async function exportAnnotated(button,d,snapshot){
+ const label=button.textContent;
+ button.disabled=true;button.textContent='Préparation du PDF…';
+ try{
+  const editor=window.EW_PDF_EDITOR;
+  if(!editor?.exportCorrections)throw Error('L’export PDF est indisponible.');
+  const notes=snapshot?{data:snapshot}:await sb.from('annotations').select('page,content').eq('document_id',d.id)
+    .eq('visibility','shared').order('created_at',{ascending:true});
+  if(notes.error)throw notes.error;
+  const response=await fetch(await docUrl(d));
+  if(!response.ok)throw Error('Impossible de récupérer le PDF original.');
+  const width=Math.min(1250,Math.max(280,document.documentElement.clientWidth-18));
+  const bytes=await editor.exportCorrections(await response.arrayBuffer(),notes.data||[],width);
+  const base=d.filename.replace(/\.pdf$/i,'').replace(/[\\/:*?"<>|]/g,'_').slice(0,120);
+  const revision=(d.revision||'').replace(/[^a-z0-9._-]/gi,'_');
+  const title='Corrigé - '+base+(revision?' - Rév '+revision:'')+'.pdf';
+  const file=new File([bytes],title,{type:'application/pdf'});
+  showExportFile(file);
+ }catch(err){modal(`<h2>Export du PDF corrigé</h2><p>${esc(err.message||'Impossible de préparer le PDF.')}</p>`)}
+ finally{button.disabled=false;button.textContent=label}
+}
+
+function showExportFile(file){
+ const url=URL.createObjectURL(file);
+ const m=modal(`<h2>PDF corrigé prêt</h2><p>${esc(file.name)}</p>
+ <div class="toolbar"><a id="downloadCorrected" class="btn secondary" href="${esc(url)}" download="${esc(file.name)}">Télécharger le PDF</a>
+ <button type="button" id="shareCorrected" hidden>Partager le PDF</button></div><p id="shareFeedback" class="error" hidden></p>`);
+ const share=$('#shareCorrected',m);
+ if(navigator.canShare?.({files:[file]})){
+  share.hidden=false;
+  share.onclick=async()=>{
+   try{await navigator.share({files:[file],title:file.name})}
+   catch(err){if(err.name!=='AbortError'){$('#shareFeedback',m).hidden=false;$('#shareFeedback',m).textContent='Partage indisponible. Tu peux télécharger le PDF.'}}
+  };
+ }
+ m.addEventListener('click',event=>{
+  if(event.target===m||event.target.closest('[data-close]'))setTimeout(()=>URL.revokeObjectURL(url),3000);
+ });
+}
 async function init(){if(!sb){main('<section class="card"><h1>Configuration requise</h1><p>Renseignez <code>config.js</code> avec votre URL Supabase et la clé publishable (anon).</p><p>Voir le guide <b>DEPLOIEMENT_IPHONE.md</b>.</p></section>');return}
  const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
  // 15-minute inactivity window; background switch is not activity.
