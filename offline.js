@@ -163,7 +163,25 @@
   async function offlineShell() {
     if (!("serviceWorker" in navigator) || !("caches" in window))
       throw Error("Ce navigateur ne permet pas le mode hors connexion.");
-    await navigator.serviceWorker.ready;
+    let timer;
+    try {
+      await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                Error(
+                  "La préparation hors connexion est indisponible. Ferme puis rouvre l’application et réessaie.",
+                ),
+              ),
+            20000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
       const cache = await caches.open("ew-shell-offline-20261125-1");
@@ -227,7 +245,12 @@
     return record;
   }
   async function onlineEditor(document, afterClose) {
-    const cached = await read("documents", key(document.id));
+    let cached;
+    try {
+      cached = await read("documents", key(document.id));
+    } catch (err) {
+      console.error("Stockage local indisponible", err);
+    }
     if (cached?.blob) {
       await open(document, false, undefined, afterClose);
       return;

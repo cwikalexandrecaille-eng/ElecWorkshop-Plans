@@ -124,7 +124,7 @@ async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user
  if(personalDevice)recordActivity();
  if(!activityWasSet){['click','keydown','touchstart','pointermove','scroll'].forEach(ev=>window.addEventListener(ev,handleActivity,{passive:true}));activityWasSet=true}
  await loadAll();
- await window.EW_OFFLINE?.remember(profile);
+ try{await window.EW_OFFLINE?.remember(profile)}catch(err){console.error('Stockage hors connexion indisponible',err)}
  window.EW_OFFLINE?.syncAll().catch(err=>console.error(err));
  window.EW_PUSH?.sync().catch(err=>console.error(err));
  const correctionId=new URL(location.href).searchParams.get('correction');

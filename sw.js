@@ -74,7 +74,7 @@ self.addEventListener("fetch", (event) => {
           : local
             ? url.origin + url.pathname
             : url.href;
-        await cache.put(key, response.clone());
+        await cache.put(key, response.clone()).catch(() => {});
         return response;
       } catch (err) {
         const key = navigation
