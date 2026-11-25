@@ -170,6 +170,7 @@
       if (
         await cache.match(
           new URL("offline.js", location.href.split("?")[0]).href,
+          { ignoreSearch: true },
         )
       )
         return;

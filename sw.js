@@ -31,9 +31,11 @@ self.addEventListener("install", (event) =>
     (async () => {
       const cache = await caches.open(shellCache);
       await cache.addAll([
-        ...localAssets.map(
-          (asset) => new URL(asset, self.registration.scope).href,
-        ),
+        ...localAssets.map((asset) => {
+          const url = new URL(asset, self.registration.scope);
+          url.searchParams.set("ew-release", "20261125-offline1");
+          return url.href;
+        }),
         ...externalAssets,
       ]);
       await self.skipWaiting();
@@ -80,7 +82,7 @@ self.addEventListener("fetch", (event) => {
           : local
             ? url.origin + url.pathname
             : url.href;
-        const cached = await cache.match(key);
+        const cached = await cache.match(key, { ignoreSearch: true });
         if (cached) return cached;
         throw err;
       }
