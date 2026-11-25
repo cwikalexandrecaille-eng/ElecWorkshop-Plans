@@ -421,8 +421,20 @@ function renderNotifications(){
   const id=(n.kind==='correction_schema'||isFeedback)&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
   const author=id&&correctionAuthor(data.correction_requests.find(r=>r.id===id));
   const previousAuthor=!isFeedback&&author&&!String(n.body).includes(' · Envoyé par ')?' · Envoyé par '+author:'';
-  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):(documentId?'Nouvelle révision':esc(n.kind))}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button></div>`:documentId?`<div class="toolbar"><button class="secondary" data-revision="${esc(documentId)}" data-notice-id="${esc(n.id)}">Ouvrir la révision</button></div>`:''}</div>`
+  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):(documentId?'Nouvelle révision':esc(n.kind))}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button></div>`:documentId?`<div class="toolbar"><button class="secondary" data-revision="${esc(documentId)}" data-notice-id="${esc(n.id)}">Ouvrir la révision</button></div>`:''}<div class="toolbar"><button type="button" class="secondary" data-delete-notice="${esc(n.id)}">Supprimer</button></div></div>`
  }).join(''):'<div class="empty">Aucune notification pour le moment.</div>'}</section>`;
+ $$('[data-delete-notice]',v).forEach(button=>button.onclick=async()=>{
+  const userId=currentUser.id,id=button.dataset.deleteNotice;
+  button.disabled=true;
+  try{
+   const result=await sb.from('notifications').delete().eq('id',id).eq('recipient_id',userId);
+   if(result.error)throw result.error;
+   if(currentUser?.id!==userId)return;
+   data.notifications=data.notifications.filter(n=>n.id!==id);
+   renderNotifications();
+   await refreshNotificationList();
+  }catch(err){error(err)}finally{button.disabled=false}
+ });
  $$('[data-revision]',v).forEach(b=>b.onclick=async()=>{
   data.documents=await q('documents');await openDocument(b.dataset.revision);
   try{await update('notifications',{is_read:true},b.dataset.noticeId);await refreshNotificationList()}catch(err){error(err)}
