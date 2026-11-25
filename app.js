@@ -29,11 +29,16 @@ const deviceModeKey='ew-personal-device', activityKey='ew-last-activity';
 const idleLimit=15*60*1000;
 let personalDevice=false, expiring=false;
 try{personalDevice=localStorage.getItem(deviceModeKey)==='true'}catch(_){}
-function storeDeviceMode(value){
+async function storeDeviceMode(value){
+ if(!value)await window.EW_PUSH?.disable();
  try{localStorage.setItem(deviceModeKey,String(value))}catch(_){
   throw Error('Ce navigateur ne peut pas mémoriser le choix de l’appareil.');
  }
  personalDevice=value;recordActivity();
+}
+async function signOutDevice(){
+ await window.EW_PUSH?.disable().catch(err=>console.error(err));
+ return sb.auth.signOut({scope:'local'});
 }
 function recordActivity(){
  lastTouch=Date.now();
@@ -46,7 +51,7 @@ async function checkInactivity(){
  if(!currentUser||personalDevice||expiring||Date.now()-lastTouch<idleLimit)return;
  expiring=true;
  try{
-  const result=await sb.auth.signOut({scope:'local'});
+  const result=await signOutDevice();
   if(result.error)throw result.error;
   currentUser=null;profile=null;
   document.querySelectorAll('.modal-bg,.ew-editor-backdrop').forEach(el=>{el._resizeCtl?.abort();el.remove()});
@@ -110,18 +115,21 @@ async function publicPage(token){sessionBar.innerHTML='';if(!sb){main('<section 
 function showLogin(){sessionBar.innerHTML='';if(!sb){main('<section class="card error">Connexion à la base indisponible.</section>');return}
  main(`<div class="ew-login"><section class="ew-login-card"><div class="ew-login-brand"><div class="ew-brand-symbol"><img src="./icon.svg" alt="" width="42" height="42"></div><strong>ElecWorkshop <span>Plans</span></strong></div><div class="ew-login-intro"><h1>Bienvenue</h1><p>Accès sécurisé aux schémas électriques</p></div><form id="loginForm" class="ew-login-form"><label for="ew-login-id">Identifiant</label><div class="ew-login-control">${ewIcon('user',21)}<input id="ew-login-id" type="text" name="username" required minlength="3" maxlength="40" pattern="[a-zA-Z0-9._-]+" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Votre identifiant"></div><label for="ew-login-pass">Mot de passe</label><div class="ew-login-control">${ewIcon('shield',21)}<input id="ew-login-pass" type="password" name="password" required autocomplete="current-password" placeholder="Votre mot de passe"><button type="button" id="ew-password-toggle" class="ew-eye" aria-label="Afficher le mot de passe">Voir</button></div><label for="ew-personal-device" class="ew-device-choice"><input id="ew-personal-device" type="checkbox" name="personalDevice" ${personalDevice?'checked':''}> Cet appareil est personnel</label><small class="ew-device-help">Cochez pour garder la connexion. En mode partagé, déconnexion après 15 minutes d’inactivité.</small><button type="submit" class="ew-login-submit">Se connecter ${ewIcon('arrow',18)}</button></form><div id="loginError" class="error" hidden></div><p class="ew-login-footer">Espace professionnel privé · ElecWorkshop Plans</p></section></div>`);
  $('#ew-password-toggle').onclick=()=>{const x=$('#ew-login-pass');x.type=x.type==='password'?'text':'password'};
- $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const r=await sb.auth.signInWithPassword({email:String(f.get('username')||'').trim().toLowerCase()+'@elecworkshop.invalid',password:f.get('password')});if(r.error)throw r.error;storeDeviceMode(f.has('personalDevice'));await signedIn()}catch(ex){$('#loginError').hidden=false;$('#loginError').textContent=ex.message}}}
+ $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const r=await sb.auth.signInWithPassword({email:String(f.get('username')||'').trim().toLowerCase()+'@elecworkshop.invalid',password:f.get('password')});if(r.error)throw r.error;await storeDeviceMode(f.has('personalDevice'));await signedIn()}catch(ex){$('#loginError').hidden=false;$('#loginError').textContent=ex.message}}}
 async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user){showLogin();return}currentUser=s.data.user;
- const r=await sb.from('profiles').select('*').eq('id',currentUser.id).single();if(r.error||!r.data?.active){await sb.auth.signOut();showLogin();alertBox('Compte sans profil actif : contactez l’administrateur.',true);return}profile=r.data;
+ const r=await sb.from('profiles').select('*').eq('id',currentUser.id).single();if(r.error||!r.data?.active){await signOutDevice();showLogin();alertBox('Compte sans profil actif : contactez l’administrateur.',true);return}profile=r.data;
  lastTouch=savedActivity();
  if(!personalDevice&&(!lastTouch||Date.now()-lastTouch>=idleLimit)){lastTouch=0;await checkInactivity();return}
  if(personalDevice)recordActivity();
  if(!activityWasSet){['click','keydown','touchstart','pointermove','scroll'].forEach(ev=>window.addEventListener(ev,handleActivity,{passive:true}));activityWasSet=true}
  await loadAll();
+ window.EW_PUSH?.sync().catch(err=>console.error(err));
  const correctionId=new URL(location.href).searchParams.get('correction');
  if(correctionId)tab='notifications';
  render();
- if(correctionId)openCorrectionRequest(correctionId,true)
+ if(correctionId)openCorrectionRequest(correctionId,true);
+ const documentId=new URL(location.href).searchParams.get('document');
+ if(documentId)openDocument(documentId)
 }
 async function loadAll(){let tables=['clients','end_clients','affairs','cabinets','documents','profiles','notifications','reports','annotations','correction_requests'];const results=await Promise.all(tables.map(async t=>[t,await q(t)]));for(const [t,rows]of results)data[t]=rows;
  recycleBin=[
@@ -199,6 +207,25 @@ function renderCabinet(){tab='folders';render();const c=cabinetById(selectedCabi
  $('#back').onclick=renderFolders;$('#svg').onclick=()=>exportSvgQr(c);$('#wmf').onclick=()=>exportWmf(c);$('#png').onclick=()=>exportPng(c);
  if($('#upload'))$('#upload').onclick=()=>openUpload(c);
  if($('#assignReferent'))$('#assignReferent').onclick=()=>assignReferent(a);
+ if(a){
+  const follow=document.createElement('button');follow.type='button';follow.className='secondary';
+  const identity=$('.ew-cab-identity>span:last-child',container);identity.append(follow);
+  follow.disabled=true;follow.textContent='Suivre les nouvelles révisions';
+  const currentUserId=currentUser.id;
+  const loadFollow=async()=>{
+   const r=await sb.from('affair_followers').select('affair_id').eq('affair_id',a.id).eq('user_id',currentUserId).maybeSingle();
+   if(r.error)throw r.error;follow.dataset.followed=String(!!r.data);follow.textContent=r.data?'Ne plus suivre l’affaire':'Suivre les nouvelles révisions';follow.disabled=false;
+  };
+  loadFollow().catch(error);
+  follow.onclick=async()=>{
+   follow.disabled=true;
+   try{
+    const r=follow.dataset.followed==='true'?await sb.from('affair_followers').delete().eq('affair_id',a.id).eq('user_id',currentUserId):
+     await sb.from('affair_followers').insert({affair_id:a.id,user_id:currentUserId});
+    if(r.error)throw r.error;await loadFollow();
+   }catch(err){error(err);follow.disabled=false}
+  };
+ }
  if($('#cabinetOptions'))$('#cabinetOptions').onclick=()=>{
   const m=modal(`<h2>Options du dossier</h2><div class="toolbar"><button class="secondary" id="trashCabinet">Supprimer l’armoire</button><button class="secondary" id="trashAffair">Supprimer l’affaire</button></div>`);
   $('#trashCabinet',m).onclick=()=>changeTrash('cabinet',c.id,c.name,true,()=>m.remove());
@@ -221,8 +248,9 @@ function renderDocuments(){const v=$('#view');v.innerHTML=`<div class="ew-screen
 function isDrawing(annotation){return String(annotation?.content||'').startsWith('EW_DRAW_V1:')}
 function openCorrections(id,page){const d=data.documents.find(x=>x.id===id);if(d)window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,initialPage:page,readOnly:true})}
 function renderAnnotations(){const v=$('#view');const rows=data.annotations.slice().sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));v.innerHTML=`<div class="ew-screen-title"><div><small>NOTES ET CORRECTIONS</small><h1>Annotations</h1><p>Commentaires et modifications liés aux révisions des schémas.</p></div></div><div class="ew-list">${rows.map(n=>{const d=data.documents.find(x=>x.id===n.document_id);return `<button class="ew-recent" data-openpdf="${n.document_id}" data-correction-page="${isDrawing(n)?esc(n.page||1):''}"><span class="ew-recent-icon">${ewIcon('pen',23)}</span><span class="ew-recent-main"><small>${esc(cabinetName(d?.cabinet_id))} · Page ${esc(n.page||1)}</small><strong>${esc(d?.filename||'Document')}</strong><span>${isDrawing(n)?'Correction graphique':'Commentaire : '+esc(String(n.content||'').slice(0,80))}</span></span>${ewIcon('chevron',19)}</button>`}).join('')||'<p class="ew-empty">Aucune annotation pour le moment.</p>'}</div>`;$$('[data-openpdf]').forEach(b=>b.onclick=()=>b.dataset.correctionPage?openCorrections(b.dataset.openpdf,b.dataset.correctionPage):openDocument(b.dataset.openpdf))}
-function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><section class="card"><label class="ew-device-choice" for="accountPersonalDevice"><input id="accountPersonalDevice" type="checkbox" ${personalDevice?'checked':''}> Cet appareil est personnel</label><p class="ew-device-help">Garder la connexion sur cet appareil. En mode partagé, déconnexion après 15 minutes d’inactivité.</p></section><div class="ew-list ew-account-list">${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;$('#accountPersonalDevice').onchange=e=>{try{storeDeviceMode(e.target.checked)}catch(err){e.target.checked=personalDevice;error(err)}};
- $$('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;render()});$('#logoutApp').onclick=async()=>{await sb.auth.signOut();currentUser=null;profile=null;showLogin()}}
+function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><section class="card"><label class="ew-device-choice" for="accountPersonalDevice"><input id="accountPersonalDevice" type="checkbox" ${personalDevice?'checked':''}> Cet appareil est personnel</label><p class="ew-device-help">Garder la connexion sur cet appareil. En mode partagé, déconnexion après 15 minutes d’inactivité.</p></section><section class="card" id="pushSettings"></section><div class="ew-list ew-account-list">${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;window.EW_PUSH?.render($('#pushSettings')).catch(error);
+ $('#accountPersonalDevice').onchange=async e=>{try{await storeDeviceMode(e.target.checked);renderAccount()}catch(err){e.target.checked=personalDevice;error(err)}};
+ $$('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;render()});$('#logoutApp').onclick=async()=>{await signOutDevice();currentUser=null;profile=null;showLogin()}}
 
 function renderAccounts(){
  const view=$('#view');
@@ -389,11 +417,16 @@ function renderNotifications(){
  const notes=data.notifications.filter(n=>n.recipient_id===currentUser.id).sort((a,b)=>b.created_at.localeCompare(a.created_at));
  v.innerHTML=`<section class="card"><h2>Notifications</h2>${notes.length?notes.map(n=>{
   const isFeedback=n.kind==='correction_feedback';
+  const documentId=n.kind==='revision_published'&&/^\?document=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
   const id=(n.kind==='correction_schema'||isFeedback)&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
   const author=id&&correctionAuthor(data.correction_requests.find(r=>r.id===id));
   const previousAuthor=!isFeedback&&author&&!String(n.body).includes(' · Envoyé par ')?' · Envoyé par '+author:'';
-  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):esc(n.kind)}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button></div>`:''}</div>`
+  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):(documentId?'Nouvelle révision':esc(n.kind))}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button></div>`:documentId?`<div class="toolbar"><button class="secondary" data-revision="${esc(documentId)}" data-notice-id="${esc(n.id)}">Ouvrir la révision</button></div>`:''}</div>`
  }).join(''):'<div class="empty">Aucune notification pour le moment.</div>'}</section>`;
+ $$('[data-revision]',v).forEach(b=>b.onclick=async()=>{
+  data.documents=await q('documents');await openDocument(b.dataset.revision);
+  try{await update('notifications',{is_read:true},b.dataset.noticeId);await refreshNotificationList()}catch(err){error(err)}
+ });
  $$('[data-notice]',v).forEach(b=>b.onclick=async()=>{
   b.disabled=true;
   try{
@@ -474,6 +507,7 @@ function showExportFile(file){
  });
 }
 async function init(){if(!sb){main('<section class="card"><h1>Configuration requise</h1><p>Renseignez <code>config.js</code> avec votre URL Supabase et la clé publishable (anon).</p><p>Voir le guide <b>DEPLOIEMENT_IPHONE.md</b>.</p></section>');return}
+ window.EW_PUSH?.init({client:sb,getUser:()=>currentUser,isPersonal:()=>personalDevice});
  const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
  setInterval(checkInactivity,15000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkInactivity()});

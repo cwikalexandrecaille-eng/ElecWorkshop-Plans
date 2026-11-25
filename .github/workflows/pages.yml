@@ -40,6 +40,9 @@ jobs:
           cp icon.svg _site/icon.svg
           cp manifest.webmanifest _site/manifest.webmanifest
           cp sw.js _site/sw.js
+          cp push.js _site/push.js
+          node --check _site/push.js
+          node --check _site/sw.js
           python3 -m venv /tmp/ew-pwa-icons
           /tmp/ew-pwa-icons/bin/pip install --quiet CairoSVG==2.7.1
           /tmp/ew-pwa-icons/bin/python -c "import cairosvg; [(cairosvg.svg2png(url='_site/icon.svg',write_to='_site/'+name,output_width=size,output_height=size)) for name,size in [('apple-touch-icon.png',180),('icon-192.png',192),('icon-512.png',512)]]"
