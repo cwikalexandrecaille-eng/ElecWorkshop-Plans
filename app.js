@@ -25,6 +25,39 @@ const accountDefaults={
  cableur:['folders','upload','annotate','send'],
  terrain:['annotate','send']
 };
+const deviceModeKey='ew-personal-device', activityKey='ew-last-activity';
+const idleLimit=15*60*1000;
+let personalDevice=false, expiring=false;
+try{personalDevice=localStorage.getItem(deviceModeKey)==='true'}catch(_){}
+function storeDeviceMode(value){
+ try{localStorage.setItem(deviceModeKey,String(value))}catch(_){
+  throw Error('Ce navigateur ne peut pas mémoriser le choix de l’appareil.');
+ }
+ personalDevice=value;recordActivity();
+}
+function recordActivity(){
+ lastTouch=Date.now();
+ try{localStorage.setItem(activityKey,String(lastTouch))}catch(_){}
+}
+function savedActivity(){
+ try{const value=Number(localStorage.getItem(activityKey));return value>0?value:0}catch(_){return 0}
+}
+async function checkInactivity(){
+ if(!currentUser||personalDevice||expiring||Date.now()-lastTouch<idleLimit)return;
+ expiring=true;
+ try{
+  const result=await sb.auth.signOut({scope:'local'});
+  if(result.error)throw result.error;
+  currentUser=null;profile=null;
+  document.querySelectorAll('.modal-bg,.ew-editor-backdrop').forEach(el=>{el._resizeCtl?.abort();el.remove()});
+  document.body.classList.remove('ew-editing');
+  showLogin();alertBox('Session terminée après 15 minutes d’inactivité.');
+ }catch(err){error(err)}finally{expiring=false}
+}
+function handleActivity(){
+ if(currentUser&&!personalDevice&&Date.now()-lastTouch>=idleLimit){checkInactivity();return}
+ recordActivity();
+}
 function isManager(person=profile){return ['admin','chef'].includes(person?.role)}
 function hasPermission(key,person=profile){
  if(!person?.active)return false;
@@ -75,11 +108,15 @@ async function publicPage(token){sessionBar.innerHTML='';if(!sb){main('<section 
  buttonEvents({login:()=>{history.replaceState(null,'',location.pathname);showLogin()}})
  }catch(e){error(e)}}
 function showLogin(){sessionBar.innerHTML='';if(!sb){main('<section class="card error">Connexion à la base indisponible.</section>');return}
- main(`<div class="ew-login"><section class="ew-login-card"><div class="ew-login-brand"><div class="ew-brand-symbol"><img src="./icon.svg" alt="" width="42" height="42"></div><strong>ElecWorkshop <span>Plans</span></strong></div><div class="ew-login-intro"><h1>Bienvenue</h1><p>Accès sécurisé aux schémas électriques</p></div><form id="loginForm" class="ew-login-form"><label for="ew-login-id">Identifiant</label><div class="ew-login-control">${ewIcon('user',21)}<input id="ew-login-id" type="text" name="username" required minlength="3" maxlength="40" pattern="[a-zA-Z0-9._-]+" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Votre identifiant"></div><label for="ew-login-pass">Mot de passe</label><div class="ew-login-control">${ewIcon('shield',21)}<input id="ew-login-pass" type="password" name="password" required autocomplete="current-password" placeholder="Votre mot de passe"><button type="button" id="ew-password-toggle" class="ew-eye" aria-label="Afficher le mot de passe">Voir</button></div><button type="submit" class="ew-login-submit">Se connecter ${ewIcon('arrow',18)}</button></form><div id="loginError" class="error" hidden></div><p class="ew-login-footer">Espace professionnel privé · ElecWorkshop Plans</p></section></div>`);
+ main(`<div class="ew-login"><section class="ew-login-card"><div class="ew-login-brand"><div class="ew-brand-symbol"><img src="./icon.svg" alt="" width="42" height="42"></div><strong>ElecWorkshop <span>Plans</span></strong></div><div class="ew-login-intro"><h1>Bienvenue</h1><p>Accès sécurisé aux schémas électriques</p></div><form id="loginForm" class="ew-login-form"><label for="ew-login-id">Identifiant</label><div class="ew-login-control">${ewIcon('user',21)}<input id="ew-login-id" type="text" name="username" required minlength="3" maxlength="40" pattern="[a-zA-Z0-9._-]+" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Votre identifiant"></div><label for="ew-login-pass">Mot de passe</label><div class="ew-login-control">${ewIcon('shield',21)}<input id="ew-login-pass" type="password" name="password" required autocomplete="current-password" placeholder="Votre mot de passe"><button type="button" id="ew-password-toggle" class="ew-eye" aria-label="Afficher le mot de passe">Voir</button></div><label for="ew-personal-device" class="ew-device-choice"><input id="ew-personal-device" type="checkbox" name="personalDevice" ${personalDevice?'checked':''}> Cet appareil est personnel</label><small class="ew-device-help">Cochez pour garder la connexion. En mode partagé, déconnexion après 15 minutes d’inactivité.</small><button type="submit" class="ew-login-submit">Se connecter ${ewIcon('arrow',18)}</button></form><div id="loginError" class="error" hidden></div><p class="ew-login-footer">Espace professionnel privé · ElecWorkshop Plans</p></section></div>`);
  $('#ew-password-toggle').onclick=()=>{const x=$('#ew-login-pass');x.type=x.type==='password'?'text':'password'};
- $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const r=await sb.auth.signInWithPassword({email:String(f.get('username')||'').trim().toLowerCase()+'@elecworkshop.invalid',password:f.get('password')});if(r.error)throw r.error;await signedIn()}catch(ex){$('#loginError').hidden=false;$('#loginError').textContent=ex.message}}}
+ $('#loginForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);try{const r=await sb.auth.signInWithPassword({email:String(f.get('username')||'').trim().toLowerCase()+'@elecworkshop.invalid',password:f.get('password')});if(r.error)throw r.error;storeDeviceMode(f.has('personalDevice'));await signedIn()}catch(ex){$('#loginError').hidden=false;$('#loginError').textContent=ex.message}}}
 async function signedIn(){let s=await sb.auth.getUser();if(s.error||!s.data.user){showLogin();return}currentUser=s.data.user;
- const r=await sb.from('profiles').select('*').eq('id',currentUser.id).single();if(r.error||!r.data?.active){await sb.auth.signOut();showLogin();alertBox('Compte sans profil actif : contactez l’administrateur.',true);return}profile=r.data;lastTouch=Date.now();if(!activityWasSet){['click','keydown','touchstart','pointermove','scroll'].forEach(ev=>window.addEventListener(ev,()=>{lastTouch=Date.now()},{passive:true}));activityWasSet=true}
+ const r=await sb.from('profiles').select('*').eq('id',currentUser.id).single();if(r.error||!r.data?.active){await sb.auth.signOut();showLogin();alertBox('Compte sans profil actif : contactez l’administrateur.',true);return}profile=r.data;
+ lastTouch=savedActivity();
+ if(!personalDevice&&(!lastTouch||Date.now()-lastTouch>=idleLimit)){lastTouch=0;await checkInactivity();return}
+ if(personalDevice)recordActivity();
+ if(!activityWasSet){['click','keydown','touchstart','pointermove','scroll'].forEach(ev=>window.addEventListener(ev,handleActivity,{passive:true}));activityWasSet=true}
  await loadAll();
  const correctionId=new URL(location.href).searchParams.get('correction');
  if(correctionId)tab='notifications';
@@ -184,7 +221,8 @@ function renderDocuments(){const v=$('#view');v.innerHTML=`<div class="ew-screen
 function isDrawing(annotation){return String(annotation?.content||'').startsWith('EW_DRAW_V1:')}
 function openCorrections(id,page){const d=data.documents.find(x=>x.id===id);if(d)window.EW_PDF_EDITOR?.open({sb,document:d,user:currentUser,docUrl,initialPage:page,readOnly:true})}
 function renderAnnotations(){const v=$('#view');const rows=data.annotations.slice().sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));v.innerHTML=`<div class="ew-screen-title"><div><small>NOTES ET CORRECTIONS</small><h1>Annotations</h1><p>Commentaires et modifications liés aux révisions des schémas.</p></div></div><div class="ew-list">${rows.map(n=>{const d=data.documents.find(x=>x.id===n.document_id);return `<button class="ew-recent" data-openpdf="${n.document_id}" data-correction-page="${isDrawing(n)?esc(n.page||1):''}"><span class="ew-recent-icon">${ewIcon('pen',23)}</span><span class="ew-recent-main"><small>${esc(cabinetName(d?.cabinet_id))} · Page ${esc(n.page||1)}</small><strong>${esc(d?.filename||'Document')}</strong><span>${isDrawing(n)?'Correction graphique':'Commentaire : '+esc(String(n.content||'').slice(0,80))}</span></span>${ewIcon('chevron',19)}</button>`}).join('')||'<p class="ew-empty">Aucune annotation pour le moment.</p>'}</div>`;$$('[data-openpdf]').forEach(b=>b.onclick=()=>b.dataset.correctionPage?openCorrections(b.dataset.openpdf,b.dataset.correctionPage):openDocument(b.dataset.openpdf))}
-function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><div class="ew-list ew-account-list">${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;$$('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;render()});$('#logoutApp').onclick=async()=>{await sb.auth.signOut();currentUser=null;profile=null;showLogin()}}
+function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><section class="card"><label class="ew-device-choice" for="accountPersonalDevice"><input id="accountPersonalDevice" type="checkbox" ${personalDevice?'checked':''}> Cet appareil est personnel</label><p class="ew-device-help">Garder la connexion sur cet appareil. En mode partagé, déconnexion après 15 minutes d’inactivité.</p></section><div class="ew-list ew-account-list">${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;$('#accountPersonalDevice').onchange=e=>{try{storeDeviceMode(e.target.checked)}catch(err){e.target.checked=personalDevice;error(err)}};
+ $$('[data-go]').forEach(b=>b.onclick=()=>{tab=b.dataset.go;render()});$('#logoutApp').onclick=async()=>{await sb.auth.signOut();currentUser=null;profile=null;showLogin()}}
 
 function renderAccounts(){
  const view=$('#view');
@@ -437,8 +475,9 @@ function showExportFile(file){
 }
 async function init(){if(!sb){main('<section class="card"><h1>Configuration requise</h1><p>Renseignez <code>config.js</code> avec votre URL Supabase et la clé publishable (anon).</p><p>Voir le guide <b>DEPLOIEMENT_IPHONE.md</b>.</p></section>');return}
  const token=new URL(location.href).searchParams.get('qr');if(token){await publicPage(token);return}const s=await sb.auth.getSession();if(s.data.session)await signedIn();else showLogin();
- // 15-minute inactivity window; background switch is not activity.
- setInterval(async()=>{if(currentUser&&Date.now()-lastTouch>15*60*1000){await sb.auth.signOut();currentUser=null;profile=null;showLogin();alertBox('Session terminée après 15 minutes d’inactivité.')}},15000);
+ setInterval(checkInactivity,15000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkInactivity()});
+ window.addEventListener('pageshow',checkInactivity);
  setInterval(refreshNotificationList,30000);document.addEventListener('visibilitychange',refreshNotificationList);
  window.addEventListener('online',()=>{if(currentUser)alertBox('Connexion Internet retrouvée.')})
 }

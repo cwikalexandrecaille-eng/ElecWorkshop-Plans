@@ -216,3 +216,7 @@ body .modal button{font-size:13px!important}
  .ew-login-card{padding:26px 22px}
 }
 @media(max-width:355px){.ew-header-brand{font-size:14px!important}.ew-hero h1{font-size:23px!important}.ew-admin-pill{font-size:9px}.ew-qr-group{grid-template-columns:1fr!important}.ew-qr-box-inner{flex-direction:row}.ew-qr-box-inner .qrwrap img{width:120px!important}.ew-label-box>button{flex-direction:row!important}}
+
+.ew-device-choice{display:flex;align-items:flex-start;gap:9px;line-height:1.45}
+.ew-device-choice input[type=checkbox]{width:20px;height:20px;flex:none;margin:1px 0 0}
+.ew-device-help{display:block;font-size:12px;line-height:1.5;color:#737981;margin:6px 0 12px}
