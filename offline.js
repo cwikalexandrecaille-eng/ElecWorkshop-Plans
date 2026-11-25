@@ -131,11 +131,27 @@
       throw Error(
         "Hors connexion. Les corrections restent enregistrées sur cet appareil.",
       );
-    const response = await options.client
-      .rpc(name, args)
-      .abortSignal(AbortSignal.timeout(12000));
-    if (response.error) throw response.error;
-    return response.data;
+    const controller = new AbortController();
+    let timer;
+    try {
+      const response = await Promise.race([
+        options.client.rpc(name, args).abortSignal(controller.signal),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              Error(
+                "Le serveur ne répond pas. Les corrections restent sur cet appareil.",
+              ),
+            );
+            controller.abort();
+          }, 12000);
+        }),
+      ]);
+      if (response.error) throw response.error;
+      return response.data;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   function notify() {
     window.dispatchEvent(new CustomEvent("ew-offline-change"));
@@ -184,7 +200,7 @@
     }
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
-      const cache = await caches.open("ew-shell-offline-20261125-2");
+      const cache = await caches.open("ew-shell-offline-20261125-3");
       if (
         await cache.match(
           new URL("offline.js", location.href.split("?")[0]).href,
@@ -244,7 +260,11 @@
     notify();
     return record;
   }
-  async function onlineEditor(document, afterClose) {
+  async function onlineEditor(
+    document,
+    afterClose,
+    { readOnly = false, initialPage = 1 } = {},
+  ) {
     let cached;
     try {
       cached = await read("documents", key(document.id));
@@ -252,7 +272,7 @@
       console.error("Stockage local indisponible", err);
     }
     if (cached?.blob) {
-      await open(document, false, undefined, afterClose);
+      await open(document, readOnly, undefined, afterClose, initialPage);
       return;
     }
     const snapshot = await rpc("offline_snapshot", { p_document: document.id });
@@ -263,7 +283,8 @@
       user: user(),
       docUrl: options.docUrl,
       annotationRows: snapshot.rows,
-      readOnly: !options.canAnnotate(),
+      initialPage,
+      readOnly: readOnly || !options.canAnnotate(),
       onClose: afterClose,
       saveAnnotations: async (page, visibility, content, rows) => {
         let base = baseline(rows, user().id, page, visibility);
@@ -385,7 +406,13 @@
             }
             return item;
           });
-        return { ...current, rows: result.rows, pending, issue: null };
+        return {
+          ...current,
+          rows: result.rows,
+          pending,
+          issue: null,
+          refreshError: null,
+        };
       });
       notify();
       if (result.status !== "synced") return;
@@ -402,7 +429,9 @@
       ? "Enregistré sur cet appareil · Synchronisation suspendue. Consulte Hors connexion."
       : record.pending.length
         ? "Enregistré sur cet appareil · Synchronisation en attente."
-        : "Corrections synchronisées.";
+        : record.refreshError
+          ? "Copie enregistrée sur cet appareil · Vérification en ligne indisponible."
+          : "Corrections synchronisées.";
     return { rows: overlay(record), message };
   }
   async function save(document, page, visibility, content, initialRows) {
@@ -461,18 +490,32 @@
       notify();
     }
   }
-  async function open(document, readOnly = false, viewRows, afterClose) {
+  async function refresh(document) {
     const record = await getRecord(document);
-    if (!viewRows && navigator.onLine && !record.pending.length) {
+    const owner = user()?.id;
+    if (
+      navigator.onLine &&
+      !record.pending.length &&
+      record.issue?.type !== "conflict"
+    ) {
       try {
         const fresh = await rpc("offline_snapshot", {
           p_document: document.id,
         });
         await change("documents", record.key, (current) => {
-          if (current.pending.length) return current;
+          if (
+            !current ||
+            user()?.id !== owner ||
+            current.pending.length ||
+            !same(current.rows, record.rows) ||
+            current.acceptedRevision !== record.acceptedRevision ||
+            current.issue?.type === "conflict"
+          )
+            return current;
           return {
             ...current,
             rows: fresh.rows,
+            refreshError: null,
             issue:
               (fresh.current?.id || null) !== current.acceptedRevision
                 ? { type: "revision", current: fresh.current }
@@ -480,14 +523,24 @@
           };
         });
       } catch (err) {
-        if (
-          navigator.onLine &&
-          !/fetch|network|timeout|connexion/i.test(err.message)
-        ) {
-          throw err;
-        }
+        await change("documents", record.key, (current) => {
+          if (!current || user()?.id !== owner) return current;
+          return {
+            ...current,
+            refreshError: err.message || "Vérification en ligne indisponible.",
+          };
+        });
       }
+      notify();
     }
+  }
+  async function open(
+    document,
+    readOnly = false,
+    viewRows,
+    afterClose,
+    initialPage = 1,
+  ) {
     const latest = await getRecord(document);
     if (latest.issue?.type === "revision" && !viewRows) {
       const label = latest.issue.current
@@ -512,6 +565,7 @@
       docUrl: options.docUrl,
       pdfData: await latest.blob.arrayBuffer(),
       annotationRows: viewRows || overlay(latest),
+      initialPage,
       catalogRows: latest.catalog,
       refreshAnnotations:
         !readOnly && !viewRows
@@ -536,6 +590,8 @@
         afterClose?.();
       },
     });
+    notify();
+    if (!viewRows) refresh(document).catch(console.error);
   }
   async function remove(record) {
     if (record.pending.length)
@@ -669,6 +725,14 @@
         button("Retirer le téléchargement", () => remove(record)),
       );
       card.append(name, state, actions);
+      if (record.refreshError) {
+        const warning = document.createElement("p");
+        warning.className = "warning";
+        warning.textContent =
+          "Copie locale disponible. Vérification en ligne : " +
+          record.refreshError;
+        card.append(warning);
+      }
       if (record.issue) {
         const warning = document.createElement("p");
         warning.className = "warning";
