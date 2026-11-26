@@ -42,6 +42,9 @@ jobs:
           cp sw.js _site/sw.js
           cp push.js _site/push.js
           cp offline.js _site/offline.js
+          cp updates.js _site/updates.js
+          node scripts/prepare-release.cjs _site "$GITHUB_SHA"
+          node --check _site/updates.js
           node --check _site/offline.js
           node --check _site/push.js
           node --check _site/sw.js

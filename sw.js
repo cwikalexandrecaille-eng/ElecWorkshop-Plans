@@ -1,10 +1,12 @@
 /* ElecWorkshop Plans — installation et notifications push. */
-const shellCache = "ew-shell-offline-20261126-3";
+const shellCache = "ew-shell-offline-__EW_BUILD__";
+const release = "__EW_BUILD__";
 const localAssets = [
   "./",
   "./index.html",
   "./app.js",
   "./offline.js",
+  "./updates.js",
   "./push.js",
   "./pdf-editor.js",
   "./style.css",
@@ -33,7 +35,7 @@ self.addEventListener("install", (event) =>
       await cache.addAll([
         ...localAssets.map((asset) => {
           const url = new URL(asset, self.registration.scope);
-          url.searchParams.set("ew-release", "20261126-review2");
+          url.searchParams.set("ew-release", "__EW_BUILD__");
           return url.href;
         }),
         ...externalAssets,
@@ -60,6 +62,9 @@ self.addEventListener("fetch", (event) => {
     url.href.startsWith(self.registration.scope);
   const local =
     url.origin === self.location.origin && localPaths.has(url.pathname);
+  const requestedRelease = url.searchParams.get("v") || url.searchParams.get("ew-release");
+  // An older worker must not replace a new build's script with its own cached copy.
+  if (local && !navigation && requestedRelease && requestedRelease !== release) return;
   if (!navigation && !local && !externalAssets.includes(url.href)) return;
   event.respondWith(
     (async () => {
