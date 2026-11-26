@@ -221,7 +221,7 @@ function annotationStatusLabel(n){
 async function openAnnotationDetails(id,afterSaved){
  try{
   data.correction_requests=await q('correction_requests');
-  const note=data.annotations.find(n=>n.id===id);if(!note)return;
+  const note=typeof id==='object'?id:data.annotations.find(n=>n.id===id);if(!note)return;
   const request=annotationRequest(note);
   if(request){openCorrectionRequest(request.id,false,afterSaved);return}
   const d=data.documents.find(doc=>doc.id===note.document_id);if(!d)return;
@@ -365,7 +365,7 @@ async function drawNotes(d,m,filter='open'){
    area.innerHTML=`<h3>Annotations de cette révision</h3>${annotationFilters(notes,filter)}`+visible.map(n=>`<div class="note"><div class="row between"><b>Page ${n.page} · ${n.visibility==='shared'?'Partagée':n.visibility==='personal'?'Personnelle':esc(n.visibility)}</b><span class="pill">${esc(annotationStatusLabel(n))}</span></div>${isDrawing(n)?`<button class="secondary" data-annotation-review="${esc(n.id)}">${annotationRequest(n)?'Voir le suivi et les corrections':'Voir les corrections'}</button>`:`<p>${esc(n.content)}</p>`}<p class="small muted">${fmt(n.created_at)}</p>${isManager()&&!annotationTreated(n)&&n.status==='open'?`<button class="secondary" data-close-note="${n.id}">Marquer traitée</button>`:''}${hasPermission('send')&&(n.author_id===currentUser.id||hasPermission('review'))?`<button class="secondary" data-convert-note="${n.id}">Convertir en signalement</button>`:''}</div>`).join('');
    if(!visible.length)area.insertAdjacentHTML('beforeend',`<p class="muted">${filter==='closed'?'Aucune annotation traitée.':filter==='all'?'Aucune annotation pour le moment.':'Aucune annotation à traiter.'}</p>`);
    $$('[data-note-filter]',area).forEach(b=>b.onclick=()=>{filter=b.dataset.noteFilter;draw()});
-   $$('[data-annotation-review]',area).forEach(b=>b.onclick=()=>openAnnotationDetails(b.dataset.annotationReview,()=>drawNotes(d,m,filter)));
+   $$('[data-annotation-review]',area).forEach(b=>b.onclick=()=>openAnnotationDetails(notes.find(n=>n.id===b.dataset.annotationReview),()=>drawNotes(d,m,filter)));
    $$('[data-close-note]',area).forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
