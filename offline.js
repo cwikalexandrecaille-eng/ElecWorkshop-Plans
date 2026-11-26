@@ -200,7 +200,7 @@
     }
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
-      const cache = await caches.open("ew-shell-offline-20261125-3");
+      const cache = await caches.open("ew-shell-offline-20261126-1");
       if (
         await cache.match(
           new URL("offline.js", location.href.split("?")[0]).href,
