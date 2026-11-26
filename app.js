@@ -161,7 +161,7 @@ async function refresh(){await loadAll();render()}
 function render(){if(!currentUser)return showLogin();sessionBar.innerHTML='';
  const nav=[['home','home','Accueil'],['folders','folder','Dossiers'],['documents','file','Documents'],['annotations','pen','Annotations'],['account','user','Compte']];
  const extra=[['reports','message','Signalements'],['notifications','bell','Notifications'],['backup','database','Sauvegardes'],...(canManageAccounts()?[['accounts','users','Utilisateurs']]:[])];
- const tabs=[...nav,...extra],selected=tabs.find(x=>x[0]===tab)||nav[0],notifCount=data.notifications.filter(n=>n.recipient_id===currentUser.id&&!n.is_read).length;
+ const tabs=[...nav,...extra],selected=tabs.find(x=>x[0]===tab)||nav[0],notifCount=data.notifications.filter(n=>n.recipient_id===currentUser.id&&!n.is_read&&!notificationTreated(n)).length;
  main(`<div class="ew-app"><aside class="ew-sidebar"><div class="ew-logo"><img src="./icon.svg" alt="" class="ew-app-logo" width="34" height="34"><span><strong>ElecWorkshop</strong><small>Plans</small></span></div><span class="ew-menu-caption">ESPACE DE TRAVAIL</span><nav class="ew-side-nav">${tabs.map(t=>`<button class="${tab===t[0]?'active':''}" data-tab="${t[0]}">${ewIcon(t[1],20)} <span>${t[2]}</span></button>`).join('')}</nav><div class="ew-side-user">${ewIcon('user',20)} <span>${esc(profile.full_name)}<small>${esc(profile.role)}</small></span></div></aside><div class="ew-app-main"><div class="ew-header"><div class="ew-header-brand"><img src="./icon.svg" alt="" class="ew-app-logo" width="34" height="34"><span><strong>ElecWorkshop</strong> Plans</span></div><div class="ew-header-actions"><button class="ew-icon-button" id="ew-notifs" aria-label="Notifications">${ewIcon('bell',23)}${notifCount?'<span class="ew-notif-dot"></span>':''}</button><button class="ew-icon-button" id="ew-account" aria-label="Compte">${ewIcon('user',23)}</button></div></div><main class="ew-content" id="view"></main></div><nav class="ew-bottom-nav" aria-label="Navigation principale">${nav.map(t=>`<button class="${tab===t[0]?'active':''}" data-tab="${t[0]}">${ewIcon(t[1],22)}<span>${t[2]}</span></button>`).join('')}</nav></div>`);
  $$('[data-tab]').forEach(el=>el.onclick=()=>{tab=el.dataset.tab;render()});
  $('#ew-notifs').onclick=async()=>{tab='notifications';render();await refreshNotificationList()};$('#ew-account').onclick=()=>{tab='account';render()};
@@ -209,8 +209,25 @@ function orderedDocuments(rows){
  const date=d=>{const value=Date.parse(d.published_at||d.created_at||'');return Number.isFinite(value)?value:0};
  return rows.slice().sort((a,b)=>Number(b.status==='published')-Number(a.status==='published')||date(b)-date(a)||String(b.revision||'').localeCompare(String(a.revision||''),'fr',{numeric:true,sensitivity:'base'})||String(a.id).localeCompare(String(b.id)));
 }
-function annotationTreated(n){
- return n.status==='closed'||data.correction_requests.some(r=>r.status==='done'&&r.document_id===n.document_id&&r.author_id===n.author_id&&Array.isArray(r.pages)&&r.pages.some(saved=>saved.id===n.id&&saved.content===n.content&&saved.page===n.page&&saved.visibility===n.visibility));
+function annotationRequest(n){
+ if(n.visibility!=='shared'||!isDrawing(n))return null;
+ return data.correction_requests.find(r=>r.document_id===n.document_id&&r.author_id===n.author_id&&Array.isArray(r.pages)&&r.pages.some(saved=>Number(saved.page)===Number(n.page)&&saved.content===n.content&&(!saved.id||saved.id===n.id)&&(!saved.visibility||saved.visibility===n.visibility)))||null;
+}
+function annotationTreated(n){const request=annotationRequest(n);return request?request.status==='done':n.status==='closed'}
+function annotationStatusLabel(n){
+ const request=annotationRequest(n);
+ return request?correctionStatuses[request.status]:(n.status==='closed'?'Traitée':'À traiter');
+}
+async function openAnnotationDetails(id,afterSaved){
+ try{
+  data.correction_requests=await q('correction_requests');
+  const note=data.annotations.find(n=>n.id===id);if(!note)return;
+  const request=annotationRequest(note);
+  if(request){openCorrectionRequest(request.id,false,afterSaved);return}
+  const d=data.documents.find(doc=>doc.id===note.document_id);if(!d)return;
+  const m=modal(`<h2>${esc(d.filename)} · Rév. ${esc(d.revision)}</h2><p>Page ${esc(note.page)} · ${esc(annotationStatusLabel(note))}</p>${isDrawing(note)?'<p>Ces corrections ne correspondent à aucune demande envoyée. Leur auteur doit les enregistrer puis les envoyer au référent pour permettre le suivi.</p>':`<p>${esc(note.content)}</p><p>Cette annotation n’a pas de demande de correction associée.</p>`}<button type="button" class="secondary" data-view-annotation>Voir le schéma</button>`);
+  $('[data-view-annotation]',m).onclick=()=>openCorrections(d.id,note.page);
+ }catch(err){error(err)}
 }
 function annotationRows(rows,filter){return rows.filter(n=>filter==='all'||(filter==='closed'?annotationTreated(n):!annotationTreated(n)))}
 function annotationFilters(rows,filter){
@@ -269,9 +286,9 @@ function isDrawing(annotation){return String(annotation?.content||'').startsWith
 async function openCorrections(id,page){const d=data.documents.find(x=>x.id===id);if(!d)return;try{await window.EW_OFFLINE.onlineEditor(d,undefined,{readOnly:true,initialPage:page})}catch(err){error(err)}}
 function renderAnnotations(filter='open'){
  const v=$('#view'),all=data.annotations.slice().sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at))),rows=annotationRows(all,filter);
- v.innerHTML=`<div class="ew-screen-title"><div><small>NOTES ET CORRECTIONS</small><h1>Annotations</h1><p>Commentaires et modifications liés aux révisions des schémas.</p></div></div>${annotationFilters(all,filter)}<div class="ew-list">${rows.map(n=>{const d=data.documents.find(x=>x.id===n.document_id);return `<button class="ew-recent" data-openpdf="${n.document_id}" data-correction-page="${isDrawing(n)?esc(n.page||1):''}"><span class="ew-recent-icon">${ewIcon('pen',23)}</span><span class="ew-recent-main"><small>${esc(cabinetName(d?.cabinet_id))} · Rév. ${esc(String(d?.revision||'').toUpperCase())} · Page ${esc(n.page||1)} · ${annotationTreated(n)?'Traitée':'À traiter'}</small><strong>${esc(d?.filename||'Document')}</strong><span>${isDrawing(n)?'Correction graphique':'Commentaire : '+esc(String(n.content||'').slice(0,80))}</span></span>${ewIcon('chevron',19)}</button>`}).join('')||`<p class="ew-empty">${filter==='closed'?'Aucune annotation traitée.':filter==='all'?'Aucune annotation pour le moment.':'Aucune annotation à traiter.'}</p>`}</div>`;
+ v.innerHTML=`<div class="ew-screen-title"><div><small>NOTES ET CORRECTIONS</small><h1>Annotations</h1><p>Commentaires et modifications liés aux révisions des schémas.</p></div></div>${annotationFilters(all,filter)}<div class="ew-list">${rows.map(n=>{const d=data.documents.find(x=>x.id===n.document_id);return `<button class="ew-recent" data-annotation="${esc(n.id)}" data-openpdf="${n.document_id}" data-correction-page="${isDrawing(n)?esc(n.page||1):''}"><span class="ew-recent-icon">${ewIcon('pen',23)}</span><span class="ew-recent-main"><small>${esc(cabinetName(d?.cabinet_id))} · Rév. ${esc(String(d?.revision||'').toUpperCase())} · Page ${esc(n.page||1)} · ${esc(annotationStatusLabel(n))}</small><strong>${esc(d?.filename||'Document')}</strong><span>${isDrawing(n)?'Correction graphique':'Commentaire : '+esc(String(n.content||'').slice(0,80))}</span></span>${ewIcon('chevron',19)}</button>`}).join('')||`<p class="ew-empty">${filter==='closed'?'Aucune annotation traitée.':filter==='all'?'Aucune annotation pour le moment.':'Aucune annotation à traiter.'}</p>`}</div>`;
  $$('[data-note-filter]',v).forEach(b=>b.onclick=()=>renderAnnotations(b.dataset.noteFilter));
- $$('[data-openpdf]',v).forEach(b=>b.onclick=()=>b.dataset.correctionPage?openCorrections(b.dataset.openpdf,b.dataset.correctionPage):openDocument(b.dataset.openpdf));
+ $$('[data-annotation]',v).forEach(b=>b.onclick=()=>openAnnotationDetails(b.dataset.annotation));
 }
 function renderAccount(){const v=$('#view');v.innerHTML=`<div class="ew-screen-title"><div><small>ESPACE PERSONNEL</small><h1>Mon compte</h1><p>Vos accès et les outils de gestion.</p></div></div><section class="ew-account-card"><span class="ew-avatar">${ewIcon('user',29)}</span><span><strong>${esc(profile.full_name)}</strong><small>${esc(profile.role)}</small></span></section><section class="card"><label class="ew-device-choice" for="accountPersonalDevice"><input id="accountPersonalDevice" type="checkbox" ${personalDevice?'checked':''}> Cet appareil est personnel</label><p class="ew-device-help">Garder la connexion sur cet appareil. En mode partagé, déconnexion après 15 minutes d’inactivité.</p></section><section class="card" id="pushSettings"></section><div class="ew-list ew-account-list"><button data-go="offline">${ewIcon('file',21)} Hors connexion ${ewIcon('chevron',19)}</button>${canManageAccounts()?`<button data-go="accounts">${ewIcon('users',21)} Utilisateurs ${ewIcon('chevron',19)}</button>`:''}${isManager()?`<button data-go="trash">${ewIcon('folder',21)} Corbeille ${ewIcon('chevron',19)}</button>`:''}<button data-go="notifications">${ewIcon('bell',21)} Notifications ${ewIcon('chevron',19)}</button><button data-go="reports">${ewIcon('message',21)} Signalements ${ewIcon('chevron',19)}</button><button data-go="backup">${ewIcon('database',21)} Sauvegardes ${ewIcon('chevron',19)}</button><button id="logoutApp">${ewIcon('logout',21)} Se déconnecter ${ewIcon('chevron',19)}</button></div>`;window.EW_PUSH?.render($('#pushSettings')).catch(error);
  $('#accountPersonalDevice').onchange=async e=>{try{await storeDeviceMode(e.target.checked);renderAccount()}catch(err){e.target.checked=personalDevice;error(err)}};
@@ -345,10 +362,10 @@ async function drawNotes(d,m,filter='open'){
   const notes=r.data||[],area=$('#notesArea',m);if(!area||!m.isConnected)return;
   const draw=()=>{
    const visible=annotationRows(notes,filter);
-   area.innerHTML=`<h3>Annotations de cette révision</h3>${annotationFilters(notes,filter)}`+visible.map(n=>`<div class="note"><div class="row between"><b>Page ${n.page} · ${n.visibility==='shared'?'Partagée':n.visibility==='personal'?'Personnelle':esc(n.visibility)}</b><span class="pill">${annotationTreated(n)?'Traitée':n.status==='open'?'À traiter':esc(n.status)}</span></div>${isDrawing(n)?`<button class="secondary" data-correction-page="${esc(n.page)}">Voir les corrections</button>`:`<p>${esc(n.content)}</p>`}<p class="small muted">${fmt(n.created_at)}</p>${isManager()&&!annotationTreated(n)&&n.status==='open'?`<button class="secondary" data-close-note="${n.id}">Marquer traitée</button>`:''}${hasPermission('send')&&(n.author_id===currentUser.id||hasPermission('review'))?`<button class="secondary" data-convert-note="${n.id}">Convertir en signalement</button>`:''}</div>`).join('');
+   area.innerHTML=`<h3>Annotations de cette révision</h3>${annotationFilters(notes,filter)}`+visible.map(n=>`<div class="note"><div class="row between"><b>Page ${n.page} · ${n.visibility==='shared'?'Partagée':n.visibility==='personal'?'Personnelle':esc(n.visibility)}</b><span class="pill">${esc(annotationStatusLabel(n))}</span></div>${isDrawing(n)?`<button class="secondary" data-annotation-review="${esc(n.id)}">${annotationRequest(n)?'Voir le suivi et les corrections':'Voir les corrections'}</button>`:`<p>${esc(n.content)}</p>`}<p class="small muted">${fmt(n.created_at)}</p>${isManager()&&!annotationTreated(n)&&n.status==='open'?`<button class="secondary" data-close-note="${n.id}">Marquer traitée</button>`:''}${hasPermission('send')&&(n.author_id===currentUser.id||hasPermission('review'))?`<button class="secondary" data-convert-note="${n.id}">Convertir en signalement</button>`:''}</div>`).join('');
    if(!visible.length)area.insertAdjacentHTML('beforeend',`<p class="muted">${filter==='closed'?'Aucune annotation traitée.':filter==='all'?'Aucune annotation pour le moment.':'Aucune annotation à traiter.'}</p>`);
    $$('[data-note-filter]',area).forEach(b=>b.onclick=()=>{filter=b.dataset.noteFilter;draw()});
-   $$('[data-correction-page]',area).forEach(b=>b.onclick=()=>openCorrections(d.id,b.dataset.correctionPage));
+   $$('[data-annotation-review]',area).forEach(b=>b.onclick=()=>openAnnotationDetails(b.dataset.annotationReview,()=>drawNotes(d,m,filter)));
    $$('[data-close-note]',area).forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     try{
@@ -412,7 +429,7 @@ async function submitCorrectionRequest(d){
  return result.data?'Corrections envoyées au référent.':'Ces corrections ont déjà été envoyées.'
 }
 function correctionAuthor(request){return request?.author_name||data.profiles.find(p=>p.id===request?.author_id)?.full_name||''}
-function openCorrectionRequest(id,showScheme=false){
+function openCorrectionRequest(id,showScheme=false,afterSaved){
  const request=data.correction_requests.find(r=>r.id===id);
  const d=data.documents.find(doc=>doc.id===request?.document_id);
  if(!request||!d){alertBox('Cette demande de correction est indisponible.',true);return}
@@ -424,7 +441,7 @@ function openCorrectionRequest(id,showScheme=false){
  ${!isReferent&&request.review_comment?`<p class="ew-review-comment"><strong>Retour du référent</strong><br>${esc(request.review_comment)}</p>`:''}
  <div class="toolbar"><button id="exportRequest" type="button" class="secondary">Exporter le PDF corrigé</button></div>
  <h3>Pages corrigées</h3><div class="toolbar">${pages.map(page=>`<button type="button" class="secondary" data-review-page="${esc(page)}">Page ${esc(page)}</button>`).join('')}</div>
- ${isReferent?`<form id="correctionStatus"><label for="correctionStatusValue">Statut</label><select id="correctionStatusValue">${Object.entries(correctionStatuses).map(([value,label])=>`<option value="${value}" ${value===request.status?'selected':''}>${label}</option>`).join('')}</select>
+ ${isReferent?`<p>Choisis le statut puis touche « Enregistrer le retour ».</p><form id="correctionStatus"><label for="correctionStatusValue">Statut</label><select id="correctionStatusValue">${Object.entries(correctionStatuses).map(([value,label])=>`<option value="${value}" ${value===request.status?'selected':''}>${label}</option>`).join('')}</select>
  <label for="correctionReviewComment">Commentaire pour le câbleur (facultatif)</label>
  <textarea id="correctionReviewComment" rows="3" maxlength="500" placeholder="Ex. Intégré dans la rév. C">${esc(request.review_comment||'')}</textarea>
  <button>Enregistrer le retour</button><div id="correctionError" class="error" hidden></div></form>`:''}`);
@@ -438,9 +455,10 @@ function openCorrectionRequest(id,showScheme=false){
   const form=e.currentTarget,button=form.querySelector('button'),message=$('#correctionError',form);
   button.disabled=true;message.hidden=true;
   try{
-   const result=await sb.rpc('set_correction_status',{p_id:id,p_status:$('#correctionStatusValue',form).value,p_submitted_at:request.submitted_at,p_comment:$('#correctionReviewComment',form).value.trim()});
+   const resultStatus=$('#correctionStatusValue',form).value;
+   const result=await sb.rpc('set_correction_status',{p_id:id,p_status:resultStatus,p_submitted_at:request.submitted_at,p_comment:$('#correctionReviewComment',form).value.trim()});
    if(result.error)throw result.error;
-   await refresh();m.remove();alertBox('Retour enregistré.');
+   await refresh();m.remove();await afterSaved?.();alertBox('Statut enregistré : '+correctionStatuses[resultStatus]+(resultStatus==='done'?' · Classé dans Traitées.':'.'));
   }catch(err){message.textContent=err.message;message.hidden=false}finally{button.disabled=false}
  }
 }
@@ -454,30 +472,40 @@ function renderCorrectionRequests(v){
   try{data.correction_requests=await q('correction_requests');openCorrectionRequest(b.dataset.reviewRequest)}catch(err){error(err)}
  })
 }
+let notificationFilter='active';
+function notificationRequest(n){
+ const id=(n.kind==='correction_schema'||n.kind==='correction_feedback')&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
+ return id?data.correction_requests.find(r=>r.id===id):null;
+}
+function notificationTreated(n){return n.kind==='correction_schema'&&notificationRequest(n)?.status==='done'}
+function notificationRows(rows,filter){return rows.filter(n=>filter==='all'||(filter==='done'?notificationTreated(n):!notificationTreated(n)))}
 async function refreshNotificationList(){
  const userId=currentUser?.id;
  if(!userId||document.hidden)return;
  try{
-  const notes=await q('notifications');
+  const [notes,requests]=await Promise.all([q('notifications'),q('correction_requests')]);
   if(currentUser?.id!==userId)return;
-  data.notifications=notes;
+  data.notifications=notes;data.correction_requests=requests;
   const bell=$('#ew-notifs'),dot=$('.ew-notif-dot',bell||document);
-  if(dot&&!notes.some(n=>!n.is_read))dot.remove();
-  if(bell&&!dot&&notes.some(n=>!n.is_read)){const badge=document.createElement('span');badge.className='ew-notif-dot';bell.append(badge)}
+  if(dot&&!notes.some(n=>!n.is_read&&!notificationTreated(n)))dot.remove();
+  if(bell&&!dot&&notes.some(n=>!n.is_read&&!notificationTreated(n))){const badge=document.createElement('span');badge.className='ew-notif-dot';bell.append(badge)}
   if(tab==='notifications'&&$('#view'))renderNotifications();
+  if(tab==='annotations'&&$('#view'))renderAnnotations($('#view [data-note-filter][aria-pressed="true"]')?.dataset.noteFilter||'open');
  }catch(err){console.error(err)}
 }
-function renderNotifications(){
+function renderNotifications(filter=notificationFilter){
+ notificationFilter=filter;
  const v=$('#view');
- const notes=data.notifications.filter(n=>n.recipient_id===currentUser.id).sort((a,b)=>b.created_at.localeCompare(a.created_at));
- v.innerHTML=`<section class="card"><h2>Notifications</h2>${notes.length?notes.map(n=>{
+ const all=data.notifications.filter(n=>n.recipient_id===currentUser.id).sort((a,b)=>b.created_at.localeCompare(a.created_at)),notes=notificationRows(all,filter);
+ v.innerHTML=`<section class="card"><h2>Notifications</h2><div class="toolbar" role="group" aria-label="Filtrer les notifications">${[['active','À suivre'],['done','Traitées'],['all','Toutes']].map(([value,label])=>`<button type="button" class="${value===filter?'':'secondary'}" data-notification-filter="${value}" aria-pressed="${value===filter}">${label} (${notificationRows(all,value).length})</button>`).join('')}</div>${notes.length?notes.map(n=>{
   const isFeedback=n.kind==='correction_feedback';
   const documentId=n.kind==='revision_published'&&/^\?document=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
   const id=(n.kind==='correction_schema'||isFeedback)&&/^\?correction=([0-9a-f-]{36})$/i.exec(n.url)?.[1];
-  const author=id&&correctionAuthor(data.correction_requests.find(r=>r.id===id));
+  const request=notificationRequest(n),author=id&&correctionAuthor(request);
   const previousAuthor=!isFeedback&&author&&!String(n.body).includes(' · Envoyé par ')?' · Envoyé par '+author:'';
-  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):(documentId?'Nouvelle révision':esc(n.kind))}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button></div>`:documentId?`<div class="toolbar"><button class="secondary" data-revision="${esc(documentId)}" data-notice-id="${esc(n.id)}">Ouvrir la révision</button></div>`:''}<div class="toolbar"><button type="button" class="secondary" data-delete-notice="${esc(n.id)}">Supprimer</button></div></div>`
- }).join(''):'<div class="empty">Aucune notification pour le moment.</div>'}</section>`;
+  return `<div class="item"><b>${id?(isFeedback?'Retour du référent':'Schéma modifié'):(documentId?'Nouvelle révision':esc(n.kind))}${n.is_read?'':' · Nouvelle'}</b><p>${esc(n.body+(previousAuthor||''))}</p><small>${fmt(n.created_at)}</small>${request?`<p class="pill">${esc(correctionStatuses[request.status])}</p>`:''}${id?`<div class="toolbar"><button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="${isFeedback?'no':'yes'}">${isFeedback?'Voir le retour':'Ouvrir le schéma modifié'}</button>${!isFeedback?`<button class="secondary" data-notice="${esc(n.id)}" data-notice-request="${esc(id)}" data-show-scheme="no">Voir le suivi</button>`:''}</div>`:documentId?`<div class="toolbar"><button class="secondary" data-revision="${esc(documentId)}" data-notice-id="${esc(n.id)}">Ouvrir la révision</button></div>`:''}<div class="toolbar"><button type="button" class="secondary" data-delete-notice="${esc(n.id)}">Supprimer</button></div></div>`
+ }).join(''):`<div class="empty">${filter==='done'?'Aucune notification traitée.':filter==='all'?'Aucune notification pour le moment.':'Aucune notification à suivre.'}</div>`}</section>`;
+ $$('[data-notification-filter]',v).forEach(b=>b.onclick=()=>renderNotifications(b.dataset.notificationFilter));
  $$('[data-delete-notice]',v).forEach(button=>button.onclick=async()=>{
   const userId=currentUser.id,id=button.dataset.deleteNotice;
   button.disabled=true;

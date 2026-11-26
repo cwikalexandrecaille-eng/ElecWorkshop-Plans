@@ -1,5 +1,5 @@
 /* ElecWorkshop Plans — installation et notifications push. */
-const shellCache = "ew-shell-offline-20261126-1";
+const shellCache = "ew-shell-offline-20261126-2";
 const localAssets = [
   "./",
   "./index.html",
@@ -33,7 +33,7 @@ self.addEventListener("install", (event) =>
       await cache.addAll([
         ...localAssets.map((asset) => {
           const url = new URL(asset, self.registration.scope);
-          url.searchParams.set("ew-release", "20261126-lists1");
+          url.searchParams.set("ew-release", "20261126-review1");
           return url.href;
         }),
         ...externalAssets,
